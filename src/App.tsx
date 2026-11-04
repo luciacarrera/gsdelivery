@@ -62,19 +62,16 @@ function App() {
         })}
       </div>
 
-      {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom (3D view only) */}
+      {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
+          In 2D it shows only the net's x/y axes and recenters the flat view. */}
       <button
         type="button"
         onClick={() => setResetKey((k) => k + 1)}
-        title="Reset view"
-        aria-label="Reset view"
-        aria-hidden={flat}
-        tabIndex={flat ? -1 : 0}
-        className={`group absolute right-6 top-[5.25rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10 ${
-          flat ? 'pointer-events-none scale-90 opacity-0' : 'opacity-100'
-        }`}
+        title={flat ? 'Recenter view' : 'Reset view'}
+        aria-label={flat ? 'Recenter view' : 'Reset view'}
+        className="group absolute right-6 top-[5.25rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10"
       >
-        <AxisGizmo ref={gizmo} />
+        <AxisGizmo ref={gizmo} flat={flat} />
       </button>
 
       <main className="relative min-h-[60vh] flex-1 cursor-grab active:cursor-grabbing">
