@@ -7,6 +7,7 @@ import {
   DoubleSide,
   Group,
   MathUtils,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
   Quaternion,
@@ -50,6 +51,14 @@ const NET_CENTER_X = (WIDTH + GLUE_TAB) / 2
 const NET_WIDTH = 2 * WIDTH + 2 * DEPTH + GLUE_TAB
 const NET_HEIGHT = HEIGHT + DEPTH
 
+// Scored creases shown on the flat net: a dark groove with a faint highlight alongside
+const CREASE_WIDTH = 0.008
+const CREASE_HIGHLIGHT_WIDTH = 0.004
+const CREASE_LIFT = 0.002 // sits just above the board so it doesn't z-fight
+const CREASE_OPACITY = 0.35
+const CREASE_HIGHLIGHT_OPACITY = 0.3
+const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
+
 const FOLD_SECONDS = 1.6
 const CAMERA_SECONDS = 1.1
 const FOV = 40
@@ -88,6 +97,39 @@ function makeCardboardTexture() {
 // 0 = closed box, 1 = flat die-cut
 const FoldContext = createContext<RefObject<number>>({ current: 0 })
 const TextureContext = createContext<Texture | null>(null)
+type CreaseMaterials = { groove: MeshBasicMaterial; highlight: MeshBasicMaterial }
+const CreaseContext = createContext<CreaseMaterials | null>(null)
+
+function makeCreaseMaterial(color: string) {
+  return new MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  })
+}
+
+// A scored fold line lying along the hinge axis, so rotation leaves it in place on the crease.
+function Crease({ axis, length }: { axis: 'x' | 'y'; length: number }) {
+  const materials = useContext(CreaseContext)!
+  const offset = (CREASE_WIDTH + CREASE_HIGHLIGHT_WIDTH) / 2
+  const along = (w: number): [number, number] => (axis === 'x' ? [length, w] : [w, length])
+  const across = (d: number): [number, number, number] =>
+    axis === 'x' ? [0, -d, CREASE_LIFT] : [d, 0, CREASE_LIFT]
+  return (
+    <>
+      <mesh material={materials.groove} position={across(0)}>
+        <planeGeometry args={along(CREASE_WIDTH)} />
+      </mesh>
+      <mesh material={materials.highlight} position={across(offset)}>
+        <planeGeometry args={along(CREASE_HIGHLIGHT_WIDTH)} />
+      </mesh>
+    </>
+  )
+}
 
 // A fold line. Flaps swing during the first half of the unfold, walls during the second.
 function Hinge({
@@ -95,12 +137,14 @@ function Hinge({
   axis,
   closed,
   stage,
+  foldLength,
   children,
 }: {
   position: [number, number, number]
   axis: 'x' | 'y'
   closed: number
   stage: 'flap' | 'wall'
+  foldLength: number
   children: ReactNode
 }) {
   const ref = useRef<Group>(null)
@@ -114,6 +158,7 @@ function Hinge({
 
   return (
     <group ref={ref} position={position} rotation={axis === 'x' ? [closed, 0, 0] : [0, closed, 0]}>
+      <Crease axis={axis} length={foldLength} />
       {children}
     </group>
   )
@@ -138,10 +183,10 @@ function Panel({ x0, width, inner }: { x0: number; width: number; inner: boolean
   return (
     <>
       <Sheet width={w} height={HEIGHT} position={[cx, 0, 0]} />
-      <Hinge position={[cx, HEIGHT / 2 - drop, 0]} axis="x" closed={-Math.PI / 2} stage="flap">
+      <Hinge position={[cx, HEIGHT / 2 - drop, 0]} axis="x" closed={-Math.PI / 2} stage="flap" foldLength={w}>
         <Sheet width={w} height={FLAP_DEPTH} position={[0, FLAP_DEPTH / 2, 0]} />
       </Hinge>
-      <Hinge position={[cx, -HEIGHT / 2 + drop, 0]} axis="x" closed={Math.PI / 2} stage="flap">
+      <Hinge position={[cx, -HEIGHT / 2 + drop, 0]} axis="x" closed={Math.PI / 2} stage="flap" foldLength={w}>
         <Sheet width={w} height={FLAP_DEPTH} position={[0, -FLAP_DEPTH / 2, 0]} />
       </Hinge>
     </>
@@ -208,6 +253,10 @@ function Tape() {
 
 function CardboardBox({ flat }: { flat: boolean }) {
   const texture = useMemo(() => makeCardboardTexture(), [])
+  const crease = useMemo<CreaseMaterials>(
+    () => ({ groove: makeCreaseMaterial('#3b2f25'), highlight: makeCreaseMaterial('#fff6e3') }),
+    [],
+  )
   const progress = useRef(flat ? 1 : 0)
   const root = useRef<Group>(null)
 
@@ -220,33 +269,41 @@ function CardboardBox({ flat }: { flat: boolean }) {
     // Slide the net so it ends up centered on the origin, facing the camera
     const t = smoothstep(progress.current)
     root.current!.position.set(-NET_CENTER_X * t, 0, (-DEPTH / 2) * t)
+
+    // Creases only show once the net has (nearly) settled flat
+    const fade = smoothstep(MathUtils.clamp((progress.current - CREASE_FADE_START) / (1 - CREASE_FADE_START), 0, 1))
+    crease.groove.opacity = CREASE_OPACITY * fade
+    crease.highlight.opacity = CREASE_HIGHLIGHT_OPACITY * fade
+    crease.groove.visible = crease.highlight.visible = fade > 0
   })
 
   return (
     <FoldContext.Provider value={progress}>
       <TextureContext.Provider value={texture}>
-        <group ref={root}>
-          {/* Front panel stays put; everything else unfolds into its plane */}
-          <group position={[0, 0, DEPTH / 2]}>
-            <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} />
+        <CreaseContext.Provider value={crease}>
+          <group ref={root}>
+            {/* Front panel stays put; everything else unfolds into its plane */}
+            <group position={[0, 0, DEPTH / 2]}>
+              <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} />
 
-            <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall">
-              <Panel x0={0} width={DEPTH} inner />
-              <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall">
-                <Panel x0={0} width={WIDTH} inner={false} />
-                <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall">
-                  <GlueTab />
+              <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                <Panel x0={0} width={DEPTH} inner />
+                <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                  <Panel x0={0} width={WIDTH} inner={false} />
+                  <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                    <GlueTab />
+                  </Hinge>
                 </Hinge>
               </Hinge>
-            </Hinge>
 
-            <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} stage="wall">
-              <Panel x0={0} width={-DEPTH} inner />
-            </Hinge>
+              <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                <Panel x0={0} width={-DEPTH} inner />
+              </Hinge>
+            </group>
+
+            <Tape />
           </group>
-
-          <Tape />
-        </group>
+        </CreaseContext.Provider>
       </TextureContext.Provider>
     </FoldContext.Provider>
   )
