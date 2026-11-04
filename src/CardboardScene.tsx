@@ -71,6 +71,8 @@ const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appe
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
 const FOV = 40
+// Starting 3D view distance multiplier (1 = original framing); stays within maxDistance (14) on mobile
+const HOME_ZOOM_OUT = 1.25
 
 const smoothstep = (t: number) => t * t * (3 - 2 * t)
 
@@ -421,13 +423,13 @@ function flatDistance(camera: PerspectiveCamera) {
   return Math.max(fitH, fitW) * 1.25
 }
 
-// Eases the camera between the free 3D view and a straight-on view of the flat net,
-// and back to the starting pose whenever `resetKey` changes.
+// Eases the camera between the starting 3D pose and a straight-on view of the flat net.
+// Switching back to 3D, or changing `resetKey`, always returns to the starting pose:
+// the previous 3D angle/zoom is never remembered.
 function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; resetKey: number }) {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const controls = useThree((s) => s.controls) as unknown as Trackball | null
   const anim = useRef<{ from: Pose; to: Pose; t: number } | null>(null)
-  const last3D = useRef<Pose | null>(null)
   const shownFlat = useRef(flat)
   const shownReset = useRef(resetKey)
 
@@ -444,13 +446,9 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       up: camera.up.clone(),
       target: controls.target.clone(),
     }
-    if (flatChanged && flat) last3D.current = current
-    // A 2D recenter shouldn't forget where the 3D view was left
-    if (resetRequested && !flat) last3D.current = null
-
     const to: Pose = flat
       ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
-      : (last3D.current ?? { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() })
+      : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
 
     // Drop any leftover trackball momentum so it doesn't fight the animation
     controls._movePrev.copy(controls._moveCurr)
@@ -559,9 +557,12 @@ export default function CardboardScene({
   resetKey: number
   onCameraFrame?: (q: Quaternion) => void
 }) {
-  // Start further back on narrow screens so the whole box fits
+  // Start further back on narrow screens so the whole box fits; HOME_ZOOM_OUT pulls both back a step
   const home = useMemo(
-    () => (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)),
+    () =>
+      (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)).multiplyScalar(
+        HOME_ZOOM_OUT,
+      ),
     [],
   )
 
