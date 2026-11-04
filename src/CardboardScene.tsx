@@ -63,7 +63,7 @@ const CREASE_OPACITY = 0.4
 const CREASE_HIGHLIGHT_OPACITY = 0.3
 const CREASE_DASH_LENGTH = 0.05
 const CREASE_DASH_SPACING = 0.085 // dash + gap
-const CREASE_DASH_THICKNESS = 0.012
+const CREASE_DASH_THICKNESS = CREASE_WIDTH // same weight as the fold creases
 const CREASE_DASH_OPACITY = 0.45
 const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
 
