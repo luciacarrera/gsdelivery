@@ -336,7 +336,15 @@ function Tape() {
   )
 }
 
-function CardboardBox({ flat }: { flat: boolean }) {
+function CardboardBox({
+  flat,
+  progress,
+  hold,
+}: {
+  flat: boolean
+  progress: RefObject<number>
+  hold: RefObject<boolean>
+}) {
   const texture = useMemo(() => makeCardboardTexture(), [])
   const crease = useMemo<CreaseMaterials>(
     () => ({
@@ -346,11 +354,12 @@ function CardboardBox({ flat }: { flat: boolean }) {
     }),
     [],
   )
-  const progress = useRef(flat ? 1 : 0)
   const root = useRef<Group>(null)
 
   useFrame((_, delta) => {
     const target = flat ? 1 : 0
+    // While the camera heads back to its starting angle, the box waits to unfold
+    if (target > progress.current && hold.current) return
     const step = Math.min(delta, 0.1) / FOLD_SECONDS
     progress.current =
       progress.current < target ? Math.min(target, progress.current + step) : Math.max(target, progress.current - step)
@@ -423,13 +432,39 @@ function flatDistance(camera: PerspectiveCamera) {
   return Math.max(fitH, fitW) * 1.25
 }
 
+const flatPose = (camera: PerspectiveCamera): Pose => ({
+  position: new Vector3(0, 0, flatDistance(camera)),
+  up: new Vector3(0, 1, 0),
+  target: new Vector3(),
+})
+const homePose = (home: Vector3): Pose => ({ position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() })
+
+// Switching to 2D plays as a sequence, so the unfolding is seen from the starting angle:
+//   toHome    -> camera returns to the starting 3D pose while the box stays closed
+//   waitWalls -> flaps open from that angle; the camera holds still
+//   toFlat    -> once the walls start to lay down, the camera turns to face the net
+type Phase = 'toHome' | 'waitWalls' | 'toFlat' | 'free'
+
 // Eases the camera between the starting 3D pose and a straight-on view of the flat net.
 // Switching back to 3D, or changing `resetKey`, always returns to the starting pose:
 // the previous 3D angle/zoom is never remembered.
-function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; resetKey: number }) {
+function CameraRig({
+  flat,
+  home,
+  resetKey,
+  progress,
+  hold,
+}: {
+  flat: boolean
+  home: Vector3
+  resetKey: number
+  progress: RefObject<number>
+  hold: RefObject<boolean>
+}) {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const controls = useThree((s) => s.controls) as unknown as Trackball | null
   const anim = useRef<{ from: Pose; to: Pose; t: number } | null>(null)
+  const phase = useRef<Phase>('free')
   const shownFlat = useRef(flat)
   const shownReset = useRef(resetKey)
 
@@ -446,23 +481,52 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       up: camera.up.clone(),
       target: controls.target.clone(),
     }
-    const to: Pose = flat
-      ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
-      : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
 
     // Drop any leftover trackball momentum so it doesn't fight the animation
     controls._movePrev.copy(controls._moveCurr)
     controls._panStart.copy(controls._panEnd)
     controls._zoomStart.copy(controls._zoomEnd)
     controls._lastAngle = 0
-
     controls.enabled = false
-    anim.current = { from: current, to, t: 0 }
-  }, [flat, resetKey, camera, controls, home])
+
+    if (flat && flatChanged) {
+      const homeP = homePose(home)
+      const atHome =
+        current.position.distanceTo(homeP.position) < 1e-3 &&
+        current.target.lengthSq() < 1e-6 &&
+        current.up.angleTo(homeP.up) < 1e-3
+      if (atHome) {
+        anim.current = null
+        phase.current = 'waitWalls'
+        hold.current = false
+      } else {
+        anim.current = { from: current, to: homeP, t: 0 }
+        phase.current = 'toHome'
+        hold.current = true
+      }
+      return
+    }
+
+    hold.current = false
+    phase.current = flat ? 'toFlat' : 'free'
+    anim.current = { from: current, to: flat ? flatPose(camera) : homePose(home), t: 0 }
+  }, [flat, resetKey, camera, controls, home, hold])
 
   useFrame((_, delta) => {
+    if (!controls) return
+
+    if (phase.current === 'waitWalls') {
+      if (progress.current < STAGES.walls[0]) return
+      phase.current = 'toFlat'
+      anim.current = {
+        from: { position: camera.position.clone(), up: camera.up.clone(), target: controls.target.clone() },
+        to: flatPose(camera),
+        t: 0,
+      }
+    }
+
     const a = anim.current
-    if (!a || !controls) return
+    if (!a) return
     a.t = Math.min(1, a.t + Math.min(delta, 0.1) / CAMERA_SECONDS)
     const e = smoothstep(a.t)
 
@@ -480,13 +544,19 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
     controls.target.copy(target)
     camera.lookAt(target)
 
-    if (a.t >= 1) {
-      anim.current = null
-      // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
-      controls.noRotate = flat
-      controls.noPan = flat
-      controls.enabled = true
+    if (a.t < 1) return
+    anim.current = null
+    if (phase.current === 'toHome') {
+      // Back at the starting angle: let the box unfold; the camera stays locked until it turns to face the net
+      phase.current = 'waitWalls'
+      hold.current = false
+      return
     }
+    phase.current = 'free'
+    // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
+    controls.noRotate = flat
+    controls.noPan = flat
+    controls.enabled = true
   })
 
   return null
@@ -565,13 +635,16 @@ export default function CardboardScene({
       ),
     [],
   )
+  // Fold progress (0 = closed box, 1 = flat die-cut), shared so the camera and the unfold can be sequenced
+  const progress = useRef(flat ? 1 : 0)
+  const foldHold = useRef(false)
 
   return (
     <Canvas camera={{ position: home.toArray(), fov: FOV }} gl={{ alpha: true }}>
       <ambientLight color="#fffaf0" intensity={1.4} />
       <CameraLight />
 
-      <CardboardBox flat={flat} />
+      <CardboardBox flat={flat} progress={progress} hold={foldHold} />
       {/* Trackball (unlike orbit) has no pole limits, so the box can be tumbled fully upside down */}
       <TrackballControls
         makeDefault
@@ -581,7 +654,7 @@ export default function CardboardScene({
         zoomSpeed={1.5}
         dynamicDampingFactor={0.15}
       />
-      <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      <CameraRig flat={flat} home={home} resetKey={resetKey} progress={progress} hold={foldHold} />
       <FlatDrag flat={flat} />
       {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
