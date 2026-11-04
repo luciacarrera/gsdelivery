@@ -75,6 +75,7 @@ const TAPE_CREASE_OPACITY_SCALE = 0.5 // creases on the tape show fainter, as if
 
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
+const TAPE_SECONDS = 0.5 // tape fading off before unfolding, and back on once the box has closed
 const FOV = 40
 // Starting 3D view distance multiplier (1 = original framing); stays within maxDistance (14) on mobile
 const HOME_ZOOM_OUT = 1.25
@@ -302,20 +303,17 @@ function GlueTab() {
   )
 }
 
-function Tape() {
+// `shown`: 0 = no tape, 1 = fully taped; CardboardBox drives it
+function Tape({ shown }: { shown: RefObject<number> }) {
   const material = useMemo(
     () => new MeshStandardMaterial({ color: '#d8b77e', roughness: 0.35, transparent: true, opacity: 0.85 }),
     [],
   )
   const group = useRef<Group>(null)
-  const progress = useContext(FoldContext)
 
-  // Tape spans the seams, so it peels away during the first half of the large-flap stage
   useFrame(() => {
-    const [start, end] = STAGES.largeFlaps
-    const fade = 1 - MathUtils.clamp((progress.current - start) / ((end - start) / 2), 0, 1)
-    material.opacity = 0.85 * fade
-    group.current!.visible = fade > 0
+    material.opacity = 0.85 * shown.current
+    group.current!.visible = shown.current > 0
   })
 
   return (
@@ -343,9 +341,9 @@ function Tape() {
 
 // Scored lines along the closed lid's short edges (top and bottom), where the narrow
 // flaps fold, continuing over the tape where it bends across those edges, plus one along
-// the taped seam between the large flaps. Like the tape, they belong to the closed box
-// and fade out as the large flaps open.
-function LidCreases() {
+// the taped seam between the large flaps. They belong to the closed box and fade out as
+// the large flaps open; the ones on the tape also come and go with the tape (`tape`).
+function LidCreases({ tape }: { tape: RefObject<number> }) {
   const materials = useMemo(
     () => ({
       groove: makeCreaseMaterial(CREASE_COLOR),
@@ -363,8 +361,9 @@ function LidCreases() {
     const fade = 1 - MathUtils.clamp((progress.current - start) / ((end - start) / 2), 0, 1)
     materials.groove.opacity = CREASE_OPACITY * fade
     materials.highlight.opacity = CREASE_HIGHLIGHT_OPACITY * fade
-    materials.tapeGroove.opacity = CREASE_OPACITY * TAPE_CREASE_OPACITY_SCALE * fade
-    materials.tapeHighlight.opacity = CREASE_HIGHLIGHT_OPACITY * TAPE_CREASE_OPACITY_SCALE * fade
+    const onTape = TAPE_CREASE_OPACITY_SCALE * fade * tape.current
+    materials.tapeGroove.opacity = CREASE_OPACITY * onTape
+    materials.tapeHighlight.opacity = CREASE_HIGHLIGHT_OPACITY * onTape
     group.current!.visible = fade > 0
   })
 
@@ -424,7 +423,15 @@ function LidCreases() {
   )
 }
 
-function CardboardBox({ flat }: { flat: boolean }) {
+function CardboardBox({
+  flat,
+  progress,
+  hold,
+}: {
+  flat: boolean
+  progress: RefObject<number>
+  hold: RefObject<boolean>
+}) {
   const texture = useMemo(() => makeCardboardTexture(), [])
   const crease = useMemo<CreaseMaterials>(
     () => ({
@@ -434,12 +441,19 @@ function CardboardBox({ flat }: { flat: boolean }) {
     }),
     [],
   )
-  const progress = useRef(flat ? 1 : 0)
   const root = useRef<Group>(null)
+  const tape = useRef(progress.current === 0 ? 1 : 0)
 
   useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.1)
+    // Tape comes off before the box opens, and only goes back on once it's fully closed
+    if (flat) tape.current = Math.max(0, tape.current - dt / TAPE_SECONDS)
+    else if (progress.current === 0) tape.current = Math.min(1, tape.current + dt / TAPE_SECONDS)
+
     const target = flat ? 1 : 0
-    const step = Math.min(delta, 0.1) / FOLD_SECONDS
+    // Hold the unfold while the camera heads back to its starting angle and while the tape comes off
+    if (target > progress.current && (hold.current || tape.current > 0)) return
+    const step = dt / FOLD_SECONDS
     progress.current =
       progress.current < target ? Math.min(target, progress.current + step) : Math.max(target, progress.current - step)
 
@@ -479,8 +493,8 @@ function CardboardBox({ flat }: { flat: boolean }) {
               </Hinge>
             </group>
 
-            <Tape />
-            <LidCreases />
+            <Tape shown={tape} />
+            <LidCreases tape={tape} />
           </group>
         </CreaseContext.Provider>
       </TextureContext.Provider>
@@ -512,13 +526,39 @@ function flatDistance(camera: PerspectiveCamera) {
   return Math.max(fitH, fitW) * 1.25
 }
 
+const flatPose = (camera: PerspectiveCamera): Pose => ({
+  position: new Vector3(0, 0, flatDistance(camera)),
+  up: new Vector3(0, 1, 0),
+  target: new Vector3(),
+})
+const homePose = (home: Vector3): Pose => ({ position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() })
+
+// Switching to 2D plays as a sequence, so the unfolding is seen from the starting angle:
+//   toHome    -> camera returns to the starting 3D pose while the box stays closed
+//   waitWalls -> flaps open from that angle; the camera holds still
+//   toFlat    -> once the walls start to lay down, the camera turns to face the net
+type Phase = 'toHome' | 'waitWalls' | 'toFlat' | 'free'
+
 // Eases the camera between the starting 3D pose and a straight-on view of the flat net.
 // Switching back to 3D, or changing `resetKey`, always returns to the starting pose:
 // the previous 3D angle/zoom is never remembered.
-function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; resetKey: number }) {
+function CameraRig({
+  flat,
+  home,
+  resetKey,
+  progress,
+  hold,
+}: {
+  flat: boolean
+  home: Vector3
+  resetKey: number
+  progress: RefObject<number>
+  hold: RefObject<boolean>
+}) {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const controls = useThree((s) => s.controls) as unknown as Trackball | null
   const anim = useRef<{ from: Pose; to: Pose; t: number } | null>(null)
+  const phase = useRef<Phase>('free')
   const shownFlat = useRef(flat)
   const shownReset = useRef(resetKey)
 
@@ -535,23 +575,52 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       up: camera.up.clone(),
       target: controls.target.clone(),
     }
-    const to: Pose = flat
-      ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
-      : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
 
     // Drop any leftover trackball momentum so it doesn't fight the animation
     controls._movePrev.copy(controls._moveCurr)
     controls._panStart.copy(controls._panEnd)
     controls._zoomStart.copy(controls._zoomEnd)
     controls._lastAngle = 0
-
     controls.enabled = false
-    anim.current = { from: current, to, t: 0 }
-  }, [flat, resetKey, camera, controls, home])
+
+    if (flat && flatChanged) {
+      const homeP = homePose(home)
+      const atHome =
+        current.position.distanceTo(homeP.position) < 1e-3 &&
+        current.target.lengthSq() < 1e-6 &&
+        current.up.angleTo(homeP.up) < 1e-3
+      if (atHome) {
+        anim.current = null
+        phase.current = 'waitWalls'
+        hold.current = false
+      } else {
+        anim.current = { from: current, to: homeP, t: 0 }
+        phase.current = 'toHome'
+        hold.current = true
+      }
+      return
+    }
+
+    hold.current = false
+    phase.current = flat ? 'toFlat' : 'free'
+    anim.current = { from: current, to: flat ? flatPose(camera) : homePose(home), t: 0 }
+  }, [flat, resetKey, camera, controls, home, hold])
 
   useFrame((_, delta) => {
+    if (!controls) return
+
+    if (phase.current === 'waitWalls') {
+      if (progress.current < STAGES.walls[0]) return
+      phase.current = 'toFlat'
+      anim.current = {
+        from: { position: camera.position.clone(), up: camera.up.clone(), target: controls.target.clone() },
+        to: flatPose(camera),
+        t: 0,
+      }
+    }
+
     const a = anim.current
-    if (!a || !controls) return
+    if (!a) return
     a.t = Math.min(1, a.t + Math.min(delta, 0.1) / CAMERA_SECONDS)
     const e = smoothstep(a.t)
 
@@ -569,13 +638,19 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
     controls.target.copy(target)
     camera.lookAt(target)
 
-    if (a.t >= 1) {
-      anim.current = null
-      // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
-      controls.noRotate = flat
-      controls.noPan = flat
-      controls.enabled = true
+    if (a.t < 1) return
+    anim.current = null
+    if (phase.current === 'toHome') {
+      // Back at the starting angle: let the box unfold; the camera stays locked until it turns to face the net
+      phase.current = 'waitWalls'
+      hold.current = false
+      return
     }
+    phase.current = 'free'
+    // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
+    controls.noRotate = flat
+    controls.noPan = flat
+    controls.enabled = true
   })
 
   return null
@@ -654,13 +729,16 @@ export default function CardboardScene({
       ),
     [],
   )
+  // Fold progress (0 = closed box, 1 = flat die-cut), shared so the camera and the unfold can be sequenced
+  const progress = useRef(flat ? 1 : 0)
+  const foldHold = useRef(false)
 
   return (
     <Canvas camera={{ position: home.toArray(), fov: FOV }} gl={{ alpha: true }}>
       <ambientLight color="#fffaf0" intensity={1.4} />
       <CameraLight />
 
-      <CardboardBox flat={flat} />
+      <CardboardBox flat={flat} progress={progress} hold={foldHold} />
       {/* Trackball (unlike orbit) has no pole limits, so the box can be tumbled fully upside down */}
       <TrackballControls
         makeDefault
@@ -670,7 +748,7 @@ export default function CardboardScene({
         zoomSpeed={1.5}
         dynamicDampingFactor={0.15}
       />
-      <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      <CameraRig flat={flat} home={home} resetKey={resetKey} progress={progress} hold={foldHold} />
       <FlatDrag flat={flat} />
       {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
