@@ -67,11 +67,21 @@ const CREASE_DASH_THICKNESS = 0.012
 const CREASE_DASH_OPACITY = 0.45
 const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
 
-const FOLD_SECONDS = 1.6
+const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
 const FOV = 40
 
 const smoothstep = (t: number) => t * t * (3 - 2 * t)
+
+// Unfold timeline, as slices of fold progress (0 = closed box, 1 = flat die-cut).
+// Like a real box: the large outer flaps open first, then the small inner flaps
+// tucked beneath them, then the walls. Folding back plays this in reverse.
+type Span = readonly [start: number, end: number]
+const STAGES = {
+  largeFlaps: [0, 1 / 3],
+  smallFlaps: [1 / 3, 2 / 3],
+  walls: [2 / 3, 1],
+} as const satisfies Record<string, Span>
 
 // Paints a kraft-paper texture.
 function makeCardboardTexture() {
@@ -189,19 +199,19 @@ function Crease({ axis, length }: { axis: 'x' | 'y'; length: number }) {
   )
 }
 
-// A fold line. Flaps swing during the first half of the unfold, walls during the second.
+// A fold line that swings open during its slice (`span`) of the unfold.
 function Hinge({
   position,
   axis,
   closed,
-  stage,
+  span,
   foldLength,
   children,
 }: {
   position: [number, number, number]
   axis: 'x' | 'y'
   closed: number
-  stage: 'flap' | 'wall'
+  span: Span
   foldLength: number
   children: ReactNode
 }) {
@@ -210,7 +220,8 @@ function Hinge({
 
   useFrame(() => {
     const p = progress.current
-    const t = MathUtils.clamp(stage === 'flap' ? p * 2 : p * 2 - 1, 0, 1)
+    const [start, end] = span
+    const t = MathUtils.clamp((p - start) / (end - start), 0, 1)
     ref.current!.rotation[axis] = closed * (1 - smoothstep(t))
   })
 
@@ -240,6 +251,7 @@ function Panel({ x0, width, inner, slits = [] }: { x0: number; width: number; in
   const cx = x0 + width / 2
   const w = Math.abs(width)
   const drop = inner ? INNER_FLAP_DROP : 0
+  const flaps = inner ? STAGES.smallFlaps : STAGES.largeFlaps
   return (
     <>
       <Sheet width={w} height={HEIGHT} position={[cx, 0, 0]} />
@@ -249,7 +261,7 @@ function Panel({ x0, width, inner, slits = [] }: { x0: number; width: number; in
           position={[cx, dir * (HEIGHT / 2 - drop), 0]}
           axis="x"
           closed={-dir * (Math.PI / 2)}
-          stage="flap"
+          span={flaps}
           foldLength={w}
         >
           <Sheet width={w} height={FLAP_DEPTH} position={[0, (dir * FLAP_DEPTH) / 2, 0]} />
@@ -290,9 +302,10 @@ function Tape() {
   const group = useRef<Group>(null)
   const progress = useContext(FoldContext)
 
-  // Tape spans the seams, so it peels away before anything opens
+  // Tape spans the seams, so it peels away during the first half of the large-flap stage
   useFrame(() => {
-    const fade = 1 - MathUtils.clamp(progress.current * 4, 0, 1)
+    const [start, end] = STAGES.largeFlaps
+    const fade = 1 - MathUtils.clamp((progress.current - start) / ((end - start) / 2), 0, 1)
     material.opacity = 0.85 * fade
     group.current!.visible = fade > 0
   })
@@ -360,17 +373,17 @@ function CardboardBox({ flat }: { flat: boolean }) {
             <group position={[0, 0, DEPTH / 2]}>
               <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} slits={[-WIDTH / 2, WIDTH / 2]} />
 
-              <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+              <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
                 <Panel x0={0} width={DEPTH} inner slits={[DEPTH]} />
-                <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
                   <Panel x0={0} width={WIDTH} inner={false} />
-                  <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+                  <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
                     <GlueTab />
                   </Hinge>
                 </Hinge>
               </Hinge>
 
-              <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} stage="wall" foldLength={HEIGHT}>
+              <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
                 <Panel x0={0} width={-DEPTH} inner />
               </Hinge>
             </group>
@@ -389,6 +402,12 @@ function CameraLight() {
   const light = useRef<DirectionalLight>(null)
   useFrame(({ camera }) => light.current?.position.copy(camera.position))
   return <directionalLight ref={light} color="#fffaf0" intensity={1.2} />
+}
+
+// Hands the camera's orientation to UI outside the canvas (e.g. the axis gizmo) every frame
+function CameraReporter({ onFrame }: { onFrame: (q: Quaternion) => void }) {
+  useFrame(({ camera }) => onFrame(camera.quaternion))
+  return null
 }
 
 type Pose = { position: Vector3; up: Vector3; target: Vector3 }
@@ -471,7 +490,15 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
   return null
 }
 
-export default function CardboardScene({ flat, resetKey }: { flat: boolean; resetKey: number }) {
+export default function CardboardScene({
+  flat,
+  resetKey,
+  onCameraFrame,
+}: {
+  flat: boolean
+  resetKey: number
+  onCameraFrame?: (q: Quaternion) => void
+}) {
   // Start further back on narrow screens so the whole box fits
   const home = useMemo(
     () => (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)),
@@ -494,6 +521,7 @@ export default function CardboardScene({ flat, resetKey }: { flat: boolean; rese
         dynamicDampingFactor={0.15}
       />
       <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
   )
 }

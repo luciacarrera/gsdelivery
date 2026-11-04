@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Quaternion } from 'three'
+import AxisGizmo, { type AxisGizmoHandle } from './AxisGizmo'
 import CardboardScene from './CardboardScene'
 
 const YEAR = new Date().getFullYear()
@@ -9,6 +11,8 @@ function App() {
   const [showHint, setShowHint] = useState(true)
   const [flat, setFlat] = useState(false)
   const [resetKey, setResetKey] = useState(0)
+  const gizmo = useRef<AxisGizmoHandle>(null)
+  const updateGizmo = useCallback((q: Quaternion) => gizmo.current?.update(q), [])
 
   useEffect(() => {
     const dismiss = () => setShowHint(false)
@@ -36,7 +40,7 @@ function App() {
         {/* Sliding highlight behind the active option */}
         <span
           aria-hidden
-          className={`absolute inset-y-1 left-1 w-12 rounded-full bg-moss transition-transform duration-300 ease-out ${
+          className={`absolute inset-y-1 left-1 w-12 rounded-full bg-cream-dark ring-1 ring-bark/15 transition-transform duration-300 ease-out ${
             flat ? 'translate-x-full' : 'translate-x-0'
           }`}
         />
@@ -48,8 +52,8 @@ function App() {
               type="button"
               aria-pressed={active}
               onClick={() => setFlat(label === '2D')}
-              className={`relative w-12 rounded-full py-1.5 transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-moss ${
-                active ? 'text-cream-light' : 'text-bark-muted hover:text-bark'
+              className={`relative w-12 rounded-full py-1.5 transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
+                active ? 'text-bark' : 'text-bark-muted hover:text-bark'
               }`}
             >
               {label}
@@ -58,7 +62,7 @@ function App() {
         })}
       </div>
 
-      {/* Compass: flies the box back to its starting angle and zoom (3D view only) */}
+      {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom (3D view only) */}
       <button
         type="button"
         onClick={() => setResetKey((k) => k + 1)}
@@ -66,36 +70,16 @@ function App() {
         aria-label="Reset view"
         aria-hidden={flat}
         tabIndex={flat ? -1 : 0}
-        className={`group absolute right-6 top-[5.25rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-moss active:scale-95 sm:right-10 ${
+        className={`group absolute right-6 top-[5.25rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10 ${
           flat ? 'pointer-events-none scale-90 opacity-0' : 'opacity-100'
         }`}
       >
-        <svg viewBox="0 0 24 24" className="h-8 w-8" aria-hidden>
-          <circle cx="12" cy="12" r="10.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
-          {[0, 90, 180, 270].map((deg) => (
-            <line
-              key={deg}
-              x1="12"
-              y1="2.4"
-              x2="12"
-              y2="4.2"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              strokeLinecap="round"
-              transform={`rotate(${deg} 12 12)`}
-            />
-          ))}
-          <g className="origin-center transition-transform duration-500 ease-out group-hover:-rotate-[25deg]">
-            <path d="M12 5 L14.4 12 L9.6 12 Z" className="fill-moss" />
-            <path d="M12 19 L14.4 12 L9.6 12 Z" className="fill-bark-muted" />
-          </g>
-          <circle cx="12" cy="12" r="1.1" className="fill-cream-light" stroke="currentColor" strokeWidth="0.6" />
-        </svg>
+        <AxisGizmo ref={gizmo} />
       </button>
 
       <main className="relative min-h-[60vh] flex-1 cursor-grab active:cursor-grabbing">
         <div className="absolute inset-0">
-          <CardboardScene flat={flat} resetKey={resetKey} />
+          <CardboardScene flat={flat} resetKey={resetKey} onCameraFrame={updateGizmo} />
         </div>
       </main>
 
