@@ -260,6 +260,12 @@ function CameraLight() {
   return <directionalLight ref={light} color="#fffaf0" intensity={1.2} />
 }
 
+// Hands the camera's orientation to UI outside the canvas (e.g. the axis gizmo) every frame
+function CameraReporter({ onFrame }: { onFrame: (q: Quaternion) => void }) {
+  useFrame(({ camera }) => onFrame(camera.quaternion))
+  return null
+}
+
 type Pose = { position: Vector3; up: Vector3; target: Vector3 }
 
 // Distance at which the flat net fits the viewport (with margin for the title/switch)
@@ -340,7 +346,15 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
   return null
 }
 
-export default function CardboardScene({ flat, resetKey }: { flat: boolean; resetKey: number }) {
+export default function CardboardScene({
+  flat,
+  resetKey,
+  onCameraFrame,
+}: {
+  flat: boolean
+  resetKey: number
+  onCameraFrame?: (q: Quaternion) => void
+}) {
   // Start further back on narrow screens so the whole box fits
   const home = useMemo(
     () => (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)),
@@ -363,6 +377,7 @@ export default function CardboardScene({ flat, resetKey }: { flat: boolean; rese
         dynamicDampingFactor={0.15}
       />
       <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
   )
 }
