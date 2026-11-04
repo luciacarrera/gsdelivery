@@ -5,18 +5,26 @@ export type AxisGizmoHandle = { update: (cameraQuaternion: Quaternion) => void }
 
 // Labels follow the Z-up convention, mapped onto three.js world axes so the starting
 // view reads z up, x front-right, y back-right (right-handed, like Rhino).
-const AXES = [
+const AXES_3D = [
   { label: 'x', dir: new Vector3(1, 0, 0) },
   { label: 'y', dir: new Vector3(0, 0, -1) },
   { label: 'z', dir: new Vector3(0, 1, 0) },
-] as const
+]
+
+// The flat net's own sheet axes: x along its width, y up its height (screen right / up when facing it)
+const AXES_2D = [
+  { label: 'x', dir: new Vector3(1, 0, 0) },
+  { label: 'y', dir: new Vector3(0, 1, 0) },
+]
 
 const C = 12 // SVG center
 const R = 7.5 // axis length
 const LABEL_R = 10.5 // label distance from center
 
-// XYZ axis indicator that turns with the camera; call `update` every frame.
-export default function AxisGizmo({ ref }: { ref?: Ref<AxisGizmoHandle> }) {
+// Axis indicator that turns with the camera; call `update` every frame.
+// `flat` swaps the XYZ set for the 2D net's XY axes.
+export default function AxisGizmo({ ref, flat = false }: { ref?: Ref<AxisGizmoHandle>; flat?: boolean }) {
+  const AXES = flat ? AXES_2D : AXES_3D
   const groups = useRef<(SVGGElement | null)[]>([])
   const lines = useRef<(SVGLineElement | null)[]>([])
   const labels = useRef<(SVGTextElement | null)[]>([])
@@ -44,12 +52,12 @@ export default function AxisGizmo({ ref }: { ref?: Ref<AxisGizmoHandle> }) {
           .forEach((i) => groups.current[i] && parent?.appendChild(groups.current[i]))
       },
     }
-  }, [])
+  }, [AXES])
 
   return (
     <svg viewBox="0 0 24 24" className="h-9 w-9 overflow-visible" aria-hidden>
       {AXES.map((axis, i) => (
-        <g key={axis.label} ref={(el) => void (groups.current[i] = el)}>
+        <g key={`${flat ? '2d' : '3d'}-${axis.label}`} ref={(el) => void (groups.current[i] = el)}>
           <line
             ref={(el) => void (lines.current[i] = el)}
             x1={C}

@@ -7,9 +7,12 @@ import {
   DoubleSide,
   Group,
   MathUtils,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  PlaneGeometry,
   Quaternion,
+  RepeatWrapping,
   Shape,
   SRGBColorSpace,
   Texture,
@@ -20,6 +23,7 @@ import {
 type Trackball = {
   enabled: boolean
   noRotate: boolean
+  noPan: boolean
   target: Vector3
   _movePrev: Vector2
   _moveCurr: Vector2
@@ -50,9 +54,25 @@ const NET_CENTER_X = (WIDTH + GLUE_TAB) / 2
 const NET_WIDTH = 2 * WIDTH + 2 * DEPTH + GLUE_TAB
 const NET_HEIGHT = HEIGHT + DEPTH
 
+// Marks shown on the flat net: folds are scored (a groove with a faint highlight
+// alongside); the slits between neighbouring flaps are dashed.
+const CREASE_COLOR = '#7a6a58'
+const CREASE_WIDTH = 0.008
+const CREASE_HIGHLIGHT_WIDTH = 0.004
+const CREASE_LIFT = 0.002 // sits just above the board so it doesn't z-fight
+const CREASE_OPACITY = 0.4
+const CREASE_HIGHLIGHT_OPACITY = 0.3
+const CREASE_DASH_LENGTH = 0.05
+const CREASE_DASH_SPACING = 0.085 // dash + gap
+const CREASE_DASH_THICKNESS = CREASE_WIDTH // same weight as the fold creases
+const CREASE_DASH_OPACITY = 0.45
+const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
+
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
 const FOV = 40
+// Starting 3D view distance multiplier (1 = original framing); stays within maxDistance (14) on mobile
+const HOME_ZOOM_OUT = 1.25
 
 const smoothstep = (t: number) => t * t * (3 - 2 * t)
 
@@ -98,6 +118,89 @@ function makeCardboardTexture() {
 // 0 = closed box, 1 = flat die-cut
 const FoldContext = createContext<RefObject<number>>({ current: 0 })
 const TextureContext = createContext<Texture | null>(null)
+type CreaseMaterials = { groove: MeshBasicMaterial; highlight: MeshBasicMaterial; dots: MeshBasicMaterial }
+const CreaseContext = createContext<CreaseMaterials | null>(null)
+
+function makeCreaseMaterial(color: string, alphaMap?: Texture) {
+  return new MeshBasicMaterial({
+    color,
+    alphaMap,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  })
+}
+
+// One round-ended dash per texture repeat; the dotted line tiles it along its length.
+function makeDashTexture() {
+  const w = 128
+  const h = Math.max(4, Math.round((w * CREASE_DASH_THICKNESS) / CREASE_DASH_SPACING))
+  const dash = (w * CREASE_DASH_LENGTH) / CREASE_DASH_SPACING
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.roundRect((w - dash) / 2, 0, dash, h, h / 2)
+  ctx.fill()
+  const texture = new CanvasTexture(canvas)
+  texture.wrapS = RepeatWrapping
+  return texture
+}
+
+// A dotted line centred on `position`, used for the slits between neighbouring flaps.
+function DottedLine({
+  axis,
+  length,
+  position,
+}: {
+  axis: 'x' | 'y'
+  length: number
+  position: [number, number]
+}) {
+  const materials = useContext(CreaseContext)!
+  const geometry = useMemo(() => {
+    // Stretch the UVs so the dash texture repeats every CREASE_DASH_SPACING along the line
+    const g = new PlaneGeometry(length, CREASE_DASH_THICKNESS)
+    const uv = g.attributes.uv
+    const repeats = Math.max(1, Math.round(length / CREASE_DASH_SPACING))
+    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * repeats)
+    return g
+  }, [length])
+  return (
+    <mesh
+      geometry={geometry}
+      material={materials.dots}
+      position={[position[0], position[1], CREASE_LIFT]}
+      rotation={[0, 0, axis === 'y' ? Math.PI / 2 : 0]}
+    />
+  )
+}
+
+// A scored fold line lying along the hinge axis, so rotation leaves it in place on the crease.
+function Crease({ axis, length }: { axis: 'x' | 'y'; length: number }) {
+  const materials = useContext(CreaseContext)!
+  const offset = (CREASE_WIDTH + CREASE_HIGHLIGHT_WIDTH) / 2
+  const along = (w: number): [number, number] => (axis === 'x' ? [length, w] : [w, length])
+  const across = (d: number): [number, number, number] =>
+    axis === 'x' ? [0, -d, CREASE_LIFT] : [d, 0, CREASE_LIFT]
+  return (
+    <>
+      <mesh material={materials.groove} position={across(0)}>
+        <planeGeometry args={along(CREASE_WIDTH)} />
+      </mesh>
+      <mesh material={materials.highlight} position={across(offset)}>
+        <planeGeometry args={along(CREASE_HIGHLIGHT_WIDTH)} />
+      </mesh>
+    </>
+  )
+}
 
 // A fold line that swings open during its slice (`span`) of the unfold.
 function Hinge({
@@ -105,12 +208,14 @@ function Hinge({
   axis,
   closed,
   span,
+  foldLength,
   children,
 }: {
   position: [number, number, number]
   axis: 'x' | 'y'
   closed: number
   span: Span
+  foldLength: number
   children: ReactNode
 }) {
   const ref = useRef<Group>(null)
@@ -125,6 +230,7 @@ function Hinge({
 
   return (
     <group ref={ref} position={position} rotation={axis === 'x' ? [closed, 0, 0] : [0, closed, 0]}>
+      <Crease axis={axis} length={foldLength} />
       {children}
     </group>
   )
@@ -142,7 +248,9 @@ function Sheet({ width, height, position }: { width: number; height: number; pos
 
 // A wall panel with its top and bottom flaps. In local space the panel spans
 // x from `x0` to `x0 + width` (width may be negative to grow leftward), outward is +z.
-function Panel({ x0, width, inner }: { x0: number; width: number; inner: boolean }) {
+// `slits` are local x positions where this panel's flaps meet a neighbour's; each gets a
+// dotted line on the net so the separate flaps read apart.
+function Panel({ x0, width, inner, slits = [] }: { x0: number; width: number; inner: boolean; slits?: number[] }) {
   const cx = x0 + width / 2
   const w = Math.abs(width)
   const drop = inner ? INNER_FLAP_DROP : 0
@@ -150,12 +258,21 @@ function Panel({ x0, width, inner }: { x0: number; width: number; inner: boolean
   return (
     <>
       <Sheet width={w} height={HEIGHT} position={[cx, 0, 0]} />
-      <Hinge position={[cx, HEIGHT / 2 - drop, 0]} axis="x" closed={-Math.PI / 2} span={flaps}>
-        <Sheet width={w} height={FLAP_DEPTH} position={[0, FLAP_DEPTH / 2, 0]} />
-      </Hinge>
-      <Hinge position={[cx, -HEIGHT / 2 + drop, 0]} axis="x" closed={Math.PI / 2} span={flaps}>
-        <Sheet width={w} height={FLAP_DEPTH} position={[0, -FLAP_DEPTH / 2, 0]} />
-      </Hinge>
+      {[1, -1].map((dir) => (
+        <Hinge
+          key={dir}
+          position={[cx, dir * (HEIGHT / 2 - drop), 0]}
+          axis="x"
+          closed={-dir * (Math.PI / 2)}
+          span={flaps}
+          foldLength={w}
+        >
+          <Sheet width={w} height={FLAP_DEPTH} position={[0, (dir * FLAP_DEPTH) / 2, 0]} />
+          {slits.map((x) => (
+            <DottedLine key={x} axis="y" length={FLAP_DEPTH} position={[x - cx, (dir * FLAP_DEPTH) / 2]} />
+          ))}
+        </Hinge>
+      ))}
     </>
   )
 }
@@ -221,6 +338,14 @@ function Tape() {
 
 function CardboardBox({ flat }: { flat: boolean }) {
   const texture = useMemo(() => makeCardboardTexture(), [])
+  const crease = useMemo<CreaseMaterials>(
+    () => ({
+      groove: makeCreaseMaterial(CREASE_COLOR),
+      highlight: makeCreaseMaterial('#fff6e3'),
+      dots: makeCreaseMaterial(CREASE_COLOR, makeDashTexture()),
+    }),
+    [],
+  )
   const progress = useRef(flat ? 1 : 0)
   const root = useRef<Group>(null)
 
@@ -233,33 +358,42 @@ function CardboardBox({ flat }: { flat: boolean }) {
     // Slide the net so it ends up centered on the origin, facing the camera
     const t = smoothstep(progress.current)
     root.current!.position.set(-NET_CENTER_X * t, 0, (-DEPTH / 2) * t)
+
+    // Creases only show once the net has (nearly) settled flat
+    const fade = smoothstep(MathUtils.clamp((progress.current - CREASE_FADE_START) / (1 - CREASE_FADE_START), 0, 1))
+    crease.groove.opacity = CREASE_OPACITY * fade
+    crease.highlight.opacity = CREASE_HIGHLIGHT_OPACITY * fade
+    crease.dots.opacity = CREASE_DASH_OPACITY * fade
+    crease.groove.visible = crease.highlight.visible = crease.dots.visible = fade > 0
   })
 
   return (
     <FoldContext.Provider value={progress}>
       <TextureContext.Provider value={texture}>
-        <group ref={root}>
-          {/* Front panel stays put; everything else unfolds into its plane */}
-          <group position={[0, 0, DEPTH / 2]}>
-            <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} />
+        <CreaseContext.Provider value={crease}>
+          <group ref={root}>
+            {/* Front panel stays put; everything else unfolds into its plane */}
+            <group position={[0, 0, DEPTH / 2]}>
+              <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} slits={[-WIDTH / 2, WIDTH / 2]} />
 
-            <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls}>
-              <Panel x0={0} width={DEPTH} inner />
-              <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls}>
-                <Panel x0={0} width={WIDTH} inner={false} />
-                <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls}>
-                  <GlueTab />
+              <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
+                <Panel x0={0} width={DEPTH} inner slits={[DEPTH]} />
+                <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
+                  <Panel x0={0} width={WIDTH} inner={false} />
+                  <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
+                    <GlueTab />
+                  </Hinge>
                 </Hinge>
               </Hinge>
-            </Hinge>
 
-            <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} span={STAGES.walls}>
-              <Panel x0={0} width={-DEPTH} inner />
-            </Hinge>
+              <Hinge position={[-WIDTH / 2, 0, 0]} axis="y" closed={-Math.PI / 2} span={STAGES.walls} foldLength={HEIGHT}>
+                <Panel x0={0} width={-DEPTH} inner />
+              </Hinge>
+            </group>
+
+            <Tape />
           </group>
-
-          <Tape />
-        </group>
+        </CreaseContext.Provider>
       </TextureContext.Provider>
     </FoldContext.Provider>
   )
@@ -289,13 +423,13 @@ function flatDistance(camera: PerspectiveCamera) {
   return Math.max(fitH, fitW) * 1.25
 }
 
-// Eases the camera between the free 3D view and a straight-on view of the flat net,
-// and back to the starting pose whenever `resetKey` changes.
+// Eases the camera between the starting 3D pose and a straight-on view of the flat net.
+// Switching back to 3D, or changing `resetKey`, always returns to the starting pose:
+// the previous 3D angle/zoom is never remembered.
 function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; resetKey: number }) {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
   const controls = useThree((s) => s.controls) as unknown as Trackball | null
   const anim = useRef<{ from: Pose; to: Pose; t: number } | null>(null)
-  const last3D = useRef<Pose | null>(null)
   const shownFlat = useRef(flat)
   const shownReset = useRef(resetKey)
 
@@ -312,21 +446,9 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       up: camera.up.clone(),
       target: controls.target.clone(),
     }
-    // Remember the 3D angle when leaving it; mid-flight, use where the camera was heading, not a half-way pose
-    if (flatChanged && flat) last3D.current = anim.current ? anim.current.to : current
-    if (resetRequested) last3D.current = null
-
-    // Switching views resets zoom and pan: 2D fits the net, 3D keeps its last angle at the default distance
-    const saved = last3D.current
     const to: Pose = flat
       ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
-      : saved
-        ? {
-            position: saved.position.clone().sub(saved.target).setLength(home.length()),
-            up: saved.up.clone(),
-            target: new Vector3(),
-          }
-        : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
+      : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
 
     // Drop any leftover trackball momentum so it doesn't fight the animation
     controls._movePrev.copy(controls._moveCurr)
@@ -360,10 +482,68 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
 
     if (a.t >= 1) {
       anim.current = null
+      // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
       controls.noRotate = flat
+      controls.noPan = flat
       controls.enabled = true
     }
   })
+
+  return null
+}
+
+// In the 2D view, dragging (mouse or one finger) slides the net around like a map.
+// Stops once any edge of the net reaches screen center, so it can't be lost off screen.
+function FlatDrag({ flat }: { flat: boolean }) {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const controls = useThree((s) => s.controls) as unknown as Trackball | null
+  const el = useThree((s) => s.gl.domElement)
+
+  useEffect(() => {
+    if (!flat || !controls) return
+    const touches = new Set<number>()
+    let drag: { id: number; lastX: number; lastY: number } | null = null
+
+    const down = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') touches.add(e.pointerId)
+      // A second finger means pinch: hand it back to the trackball
+      if (touches.size > 1) return void (drag = null)
+      if (!controls.enabled || e.button !== 0) return
+      drag = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY }
+    }
+    const move = (e: PointerEvent) => {
+      if (!drag || e.pointerId !== drag.id || !controls.enabled) return
+      // Pixels → world units on the net's plane, so the net stays under the pointer
+      const dist = camera.position.distanceTo(controls.target)
+      const worldPerPx = (2 * dist * Math.tan(MathUtils.degToRad(camera.fov / 2))) / el.clientHeight
+      // Screen y grows downward, world y upward
+      const nextX = controls.target.x - (e.clientX - drag.lastX) * worldPerPx
+      const nextY = controls.target.y + (e.clientY - drag.lastY) * worldPerPx
+      const dx = MathUtils.clamp(nextX, -NET_WIDTH / 2, NET_WIDTH / 2) - controls.target.x
+      const dy = MathUtils.clamp(nextY, -NET_HEIGHT / 2, NET_HEIGHT / 2) - controls.target.y
+      controls.target.x += dx
+      controls.target.y += dy
+      camera.position.x += dx
+      camera.position.y += dy
+      drag.lastX = e.clientX
+      drag.lastY = e.clientY
+    }
+    const up = (e: PointerEvent) => {
+      touches.delete(e.pointerId)
+      if (drag?.id === e.pointerId) drag = null
+    }
+
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [flat, camera, controls, el])
 
   return null
 }
@@ -377,9 +557,12 @@ export default function CardboardScene({
   resetKey: number
   onCameraFrame?: (q: Quaternion) => void
 }) {
-  // Start further back on narrow screens so the whole box fits
+  // Start further back on narrow screens so the whole box fits; HOME_ZOOM_OUT pulls both back a step
   const home = useMemo(
-    () => (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)),
+    () =>
+      (window.innerWidth < 640 ? new Vector3(5.4, 3.9, 6.6) : new Vector3(3.6, 2.6, 4.4)).multiplyScalar(
+        HOME_ZOOM_OUT,
+      ),
     [],
   )
 
@@ -399,6 +582,7 @@ export default function CardboardScene({
         dynamicDampingFactor={0.15}
       />
       <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      <FlatDrag flat={flat} />
       {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
   )
