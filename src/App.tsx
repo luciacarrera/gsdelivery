@@ -32,8 +32,9 @@ function App() {
         </p>
       </header>
 
-      {/* Top-right controls: axis gizmo to the left of the 3D/2D switch */}
-      <div className="absolute right-6 top-8 z-20 flex items-center gap-3 sm:right-10">
+      {/* View controls: bottom-right on mobile (above the copyright, clear of the title),
+          top-right from sm up. Axis gizmo sits to the left of the 3D/2D switch. */}
+      <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] right-6 z-20 flex items-center gap-3 sm:bottom-auto sm:right-10 sm:top-8">
         {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
             In 2D it shows only the net's x/y axes and recenters the flat view. */}
         <button
@@ -85,7 +86,7 @@ function App() {
 
       <div
         aria-hidden={!showHint}
-        className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center text-xl font-medium leading-snug text-white text-shadow-lg text-shadow-bark/60sm:text-2xl transition-opacity duration-700 ${
+        className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center text-xl font-medium leading-snug text-white text-shadow-lg text-shadow-bark/60 sm:text-2xl transition-opacity duration-700 ${
           showHint ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -96,7 +97,7 @@ function App() {
         </p>
       </div>
 
-      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 w-full px-6 pt-8 pb-4 text-sm text-bark-muted sm:px-10">
+      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 w-full px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted sm:px-10">
         <p className="text-right">© {YEAR} Corrugated Metabolism</p>
       </footer>
     </div>
