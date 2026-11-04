@@ -312,12 +312,21 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       up: camera.up.clone(),
       target: controls.target.clone(),
     }
-    if (flatChanged && flat) last3D.current = current
+    // Remember the 3D angle when leaving it; mid-flight, use where the camera was heading, not a half-way pose
+    if (flatChanged && flat) last3D.current = anim.current ? anim.current.to : current
     if (resetRequested) last3D.current = null
 
+    // Switching views resets zoom and pan: 2D fits the net, 3D keeps its last angle at the default distance
+    const saved = last3D.current
     const to: Pose = flat
       ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
-      : (last3D.current ?? { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() })
+      : saved
+        ? {
+            position: saved.position.clone().sub(saved.target).setLength(home.length()),
+            up: saved.up.clone(),
+            target: new Vector3(),
+          }
+        : { position: home.clone(), up: new Vector3(0, 1, 0), target: new Vector3() }
 
     // Drop any leftover trackball momentum so it doesn't fight the animation
     controls._movePrev.copy(controls._moveCurr)

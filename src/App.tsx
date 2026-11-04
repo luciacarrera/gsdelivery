@@ -35,7 +35,7 @@ function App() {
       <div
         role="group"
         aria-label="View mode"
-        className="absolute right-6 top-8 z-20 flex rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15 sm:right-10"
+        className="absolute right-6 top-8 z-20 flex h-11 rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15 sm:right-10"
       >
         {/* Sliding highlight behind the active option */}
         <span
@@ -52,7 +52,7 @@ function App() {
               type="button"
               aria-pressed={active}
               onClick={() => setFlat(label === '2D')}
-              className={`relative w-12 rounded-full py-1.5 transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
+              className={`relative h-9 w-12 rounded-full transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
                 active ? 'text-bark' : 'text-bark-muted hover:text-bark'
               }`}
             >
@@ -70,7 +70,7 @@ function App() {
         aria-label="Reset view"
         aria-hidden={flat}
         tabIndex={flat ? -1 : 0}
-        className={`group absolute right-6 top-[5.25rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10 ${
+        className={`group absolute right-6 top-[5.5rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10 ${
           flat ? 'pointer-events-none scale-90 opacity-0' : 'opacity-100'
         }`}
       >
