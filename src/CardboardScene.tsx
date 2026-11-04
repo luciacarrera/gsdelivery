@@ -10,7 +10,9 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  PlaneGeometry,
   Quaternion,
+  RepeatWrapping,
   Shape,
   SRGBColorSpace,
   Texture,
@@ -51,12 +53,18 @@ const NET_CENTER_X = (WIDTH + GLUE_TAB) / 2
 const NET_WIDTH = 2 * WIDTH + 2 * DEPTH + GLUE_TAB
 const NET_HEIGHT = HEIGHT + DEPTH
 
-// Scored creases shown on the flat net: a dark groove with a faint highlight alongside
+// Marks shown on the flat net: folds are scored (a groove with a faint highlight
+// alongside); the slits between neighbouring flaps are dashed.
+const CREASE_COLOR = '#7a6a58'
 const CREASE_WIDTH = 0.008
 const CREASE_HIGHLIGHT_WIDTH = 0.004
 const CREASE_LIFT = 0.002 // sits just above the board so it doesn't z-fight
-const CREASE_OPACITY = 0.35
+const CREASE_OPACITY = 0.4
 const CREASE_HIGHLIGHT_OPACITY = 0.3
+const CREASE_DASH_LENGTH = 0.05
+const CREASE_DASH_SPACING = 0.085 // dash + gap
+const CREASE_DASH_THICKNESS = 0.012
+const CREASE_DASH_OPACITY = 0.45
 const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
 
 const FOLD_SECONDS = 1.6
@@ -97,12 +105,13 @@ function makeCardboardTexture() {
 // 0 = closed box, 1 = flat die-cut
 const FoldContext = createContext<RefObject<number>>({ current: 0 })
 const TextureContext = createContext<Texture | null>(null)
-type CreaseMaterials = { groove: MeshBasicMaterial; highlight: MeshBasicMaterial }
+type CreaseMaterials = { groove: MeshBasicMaterial; highlight: MeshBasicMaterial; dots: MeshBasicMaterial }
 const CreaseContext = createContext<CreaseMaterials | null>(null)
 
-function makeCreaseMaterial(color: string) {
+function makeCreaseMaterial(color: string, alphaMap?: Texture) {
   return new MeshBasicMaterial({
     color,
+    alphaMap,
     transparent: true,
     opacity: 0,
     depthWrite: false,
@@ -110,6 +119,55 @@ function makeCreaseMaterial(color: string) {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
   })
+}
+
+// One round-ended dash per texture repeat; the dotted line tiles it along its length.
+function makeDashTexture() {
+  const w = 128
+  const h = Math.max(4, Math.round((w * CREASE_DASH_THICKNESS) / CREASE_DASH_SPACING))
+  const dash = (w * CREASE_DASH_LENGTH) / CREASE_DASH_SPACING
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.roundRect((w - dash) / 2, 0, dash, h, h / 2)
+  ctx.fill()
+  const texture = new CanvasTexture(canvas)
+  texture.wrapS = RepeatWrapping
+  return texture
+}
+
+// A dotted line centred on `position`, used for the slits between neighbouring flaps.
+function DottedLine({
+  axis,
+  length,
+  position,
+}: {
+  axis: 'x' | 'y'
+  length: number
+  position: [number, number]
+}) {
+  const materials = useContext(CreaseContext)!
+  const geometry = useMemo(() => {
+    // Stretch the UVs so the dash texture repeats every CREASE_DASH_SPACING along the line
+    const g = new PlaneGeometry(length, CREASE_DASH_THICKNESS)
+    const uv = g.attributes.uv
+    const repeats = Math.max(1, Math.round(length / CREASE_DASH_SPACING))
+    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * repeats)
+    return g
+  }, [length])
+  return (
+    <mesh
+      geometry={geometry}
+      material={materials.dots}
+      position={[position[0], position[1], CREASE_LIFT]}
+      rotation={[0, 0, axis === 'y' ? Math.PI / 2 : 0]}
+    />
+  )
 }
 
 // A scored fold line lying along the hinge axis, so rotation leaves it in place on the crease.
@@ -176,19 +234,30 @@ function Sheet({ width, height, position }: { width: number; height: number; pos
 
 // A wall panel with its top and bottom flaps. In local space the panel spans
 // x from `x0` to `x0 + width` (width may be negative to grow leftward), outward is +z.
-function Panel({ x0, width, inner }: { x0: number; width: number; inner: boolean }) {
+// `slits` are local x positions where this panel's flaps meet a neighbour's; each gets a
+// dotted line on the net so the separate flaps read apart.
+function Panel({ x0, width, inner, slits = [] }: { x0: number; width: number; inner: boolean; slits?: number[] }) {
   const cx = x0 + width / 2
   const w = Math.abs(width)
   const drop = inner ? INNER_FLAP_DROP : 0
   return (
     <>
       <Sheet width={w} height={HEIGHT} position={[cx, 0, 0]} />
-      <Hinge position={[cx, HEIGHT / 2 - drop, 0]} axis="x" closed={-Math.PI / 2} stage="flap" foldLength={w}>
-        <Sheet width={w} height={FLAP_DEPTH} position={[0, FLAP_DEPTH / 2, 0]} />
-      </Hinge>
-      <Hinge position={[cx, -HEIGHT / 2 + drop, 0]} axis="x" closed={Math.PI / 2} stage="flap" foldLength={w}>
-        <Sheet width={w} height={FLAP_DEPTH} position={[0, -FLAP_DEPTH / 2, 0]} />
-      </Hinge>
+      {[1, -1].map((dir) => (
+        <Hinge
+          key={dir}
+          position={[cx, dir * (HEIGHT / 2 - drop), 0]}
+          axis="x"
+          closed={-dir * (Math.PI / 2)}
+          stage="flap"
+          foldLength={w}
+        >
+          <Sheet width={w} height={FLAP_DEPTH} position={[0, (dir * FLAP_DEPTH) / 2, 0]} />
+          {slits.map((x) => (
+            <DottedLine key={x} axis="y" length={FLAP_DEPTH} position={[x - cx, (dir * FLAP_DEPTH) / 2]} />
+          ))}
+        </Hinge>
+      ))}
     </>
   )
 }
@@ -254,7 +323,11 @@ function Tape() {
 function CardboardBox({ flat }: { flat: boolean }) {
   const texture = useMemo(() => makeCardboardTexture(), [])
   const crease = useMemo<CreaseMaterials>(
-    () => ({ groove: makeCreaseMaterial('#3b2f25'), highlight: makeCreaseMaterial('#fff6e3') }),
+    () => ({
+      groove: makeCreaseMaterial(CREASE_COLOR),
+      highlight: makeCreaseMaterial('#fff6e3'),
+      dots: makeCreaseMaterial(CREASE_COLOR, makeDashTexture()),
+    }),
     [],
   )
   const progress = useRef(flat ? 1 : 0)
@@ -274,7 +347,8 @@ function CardboardBox({ flat }: { flat: boolean }) {
     const fade = smoothstep(MathUtils.clamp((progress.current - CREASE_FADE_START) / (1 - CREASE_FADE_START), 0, 1))
     crease.groove.opacity = CREASE_OPACITY * fade
     crease.highlight.opacity = CREASE_HIGHLIGHT_OPACITY * fade
-    crease.groove.visible = crease.highlight.visible = fade > 0
+    crease.dots.opacity = CREASE_DASH_OPACITY * fade
+    crease.groove.visible = crease.highlight.visible = crease.dots.visible = fade > 0
   })
 
   return (
@@ -284,10 +358,10 @@ function CardboardBox({ flat }: { flat: boolean }) {
           <group ref={root}>
             {/* Front panel stays put; everything else unfolds into its plane */}
             <group position={[0, 0, DEPTH / 2]}>
-              <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} />
+              <Panel x0={-WIDTH / 2} width={WIDTH} inner={false} slits={[-WIDTH / 2, WIDTH / 2]} />
 
               <Hinge position={[WIDTH / 2, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
-                <Panel x0={0} width={DEPTH} inner />
+                <Panel x0={0} width={DEPTH} inner slits={[DEPTH]} />
                 <Hinge position={[DEPTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
                   <Panel x0={0} width={WIDTH} inner={false} />
                   <Hinge position={[WIDTH, 0, 0]} axis="y" closed={Math.PI / 2} stage="wall" foldLength={HEIGHT}>
