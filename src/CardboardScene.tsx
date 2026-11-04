@@ -20,6 +20,7 @@ import {
 type Trackball = {
   enabled: boolean
   noRotate: boolean
+  noPan: boolean
   target: Vector3
   _movePrev: Vector2
   _moveCurr: Vector2
@@ -351,10 +352,68 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
 
     if (a.t >= 1) {
       anim.current = null
+      // In 2D, FlatDrag owns dragging (sideways only), so the trackball just zooms
       controls.noRotate = flat
+      controls.noPan = flat
       controls.enabled = true
     }
   })
+
+  return null
+}
+
+// In the 2D view, dragging (mouse or one finger) slides the net around like a map.
+// Stops once any edge of the net reaches screen center, so it can't be lost off screen.
+function FlatDrag({ flat }: { flat: boolean }) {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const controls = useThree((s) => s.controls) as unknown as Trackball | null
+  const el = useThree((s) => s.gl.domElement)
+
+  useEffect(() => {
+    if (!flat || !controls) return
+    const touches = new Set<number>()
+    let drag: { id: number; lastX: number; lastY: number } | null = null
+
+    const down = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') touches.add(e.pointerId)
+      // A second finger means pinch: hand it back to the trackball
+      if (touches.size > 1) return void (drag = null)
+      if (!controls.enabled || e.button !== 0) return
+      drag = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY }
+    }
+    const move = (e: PointerEvent) => {
+      if (!drag || e.pointerId !== drag.id || !controls.enabled) return
+      // Pixels → world units on the net's plane, so the net stays under the pointer
+      const dist = camera.position.distanceTo(controls.target)
+      const worldPerPx = (2 * dist * Math.tan(MathUtils.degToRad(camera.fov / 2))) / el.clientHeight
+      // Screen y grows downward, world y upward
+      const nextX = controls.target.x - (e.clientX - drag.lastX) * worldPerPx
+      const nextY = controls.target.y + (e.clientY - drag.lastY) * worldPerPx
+      const dx = MathUtils.clamp(nextX, -NET_WIDTH / 2, NET_WIDTH / 2) - controls.target.x
+      const dy = MathUtils.clamp(nextY, -NET_HEIGHT / 2, NET_HEIGHT / 2) - controls.target.y
+      controls.target.x += dx
+      controls.target.y += dy
+      camera.position.x += dx
+      camera.position.y += dy
+      drag.lastX = e.clientX
+      drag.lastY = e.clientY
+    }
+    const up = (e: PointerEvent) => {
+      touches.delete(e.pointerId)
+      if (drag?.id === e.pointerId) drag = null
+    }
+
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [flat, camera, controls, el])
 
   return null
 }
@@ -390,6 +449,7 @@ export default function CardboardScene({
         dynamicDampingFactor={0.15}
       />
       <CameraRig flat={flat} home={home} resetKey={resetKey} />
+      <FlatDrag flat={flat} />
       {onCameraFrame && <CameraReporter onFrame={onCameraFrame} />}
     </Canvas>
   )
