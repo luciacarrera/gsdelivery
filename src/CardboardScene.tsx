@@ -313,7 +313,8 @@ function CameraRig({ flat, home, resetKey }: { flat: boolean; home: Vector3; res
       target: controls.target.clone(),
     }
     if (flatChanged && flat) last3D.current = current
-    if (resetRequested) last3D.current = null
+    // A 2D recenter shouldn't forget where the 3D view was left
+    if (resetRequested && !flat) last3D.current = null
 
     const to: Pose = flat
       ? { position: new Vector3(0, 0, flatDistance(camera)), up: new Vector3(0, 1, 0), target: new Vector3() }
