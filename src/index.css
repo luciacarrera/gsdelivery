@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #f5efdc;
+  --color-cream-light: #fbf7ec;
+  --color-bark: #3b2f25;
+  --color-bark-muted: #7a6a58;
+  --color-moss: #5e6b3a;
+
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+html {
+  background-color: var(--color-cream);
+}
