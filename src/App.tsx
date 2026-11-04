@@ -34,25 +34,22 @@ function App() {
 
       {/* Top-right controls: axis gizmo to the left of the 3D/2D switch */}
       <div className="absolute right-6 top-8 z-20 flex items-center gap-3 sm:right-10">
-        {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom (3D view only) */}
+        {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
+            In 2D it shows only the net's x/y axes and recenters the flat view. */}
         <button
           type="button"
           onClick={() => setResetKey((k) => k + 1)}
-          title="Reset view"
-          aria-label="Reset view"
-          aria-hidden={flat}
-          tabIndex={flat ? -1 : 0}
-          className={`group flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 ${
-            flat ? 'pointer-events-none scale-90 opacity-0' : 'opacity-100'
-          }`}
+          title={flat ? 'Recenter view' : 'Reset view'}
+          aria-label={flat ? 'Recenter view' : 'Reset view'}
+          className="group flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95"
         >
-          <AxisGizmo ref={gizmo} />
+          <AxisGizmo ref={gizmo} flat={flat} />
         </button>
 
         <div
           role="group"
           aria-label="View mode"
-          className="relative flex rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15"
+          className="relative flex h-11 rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15"
         >
           {/* Sliding highlight behind the active option */}
           <span
@@ -69,7 +66,7 @@ function App() {
                 type="button"
                 aria-pressed={active}
                 onClick={() => setFlat(label === '2D')}
-                className={`relative w-12 rounded-full py-1.5 transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
+                className={`relative h-9 w-12 rounded-full transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
                   active ? 'text-bark' : 'text-bark-muted hover:text-bark'
                 }`}
               >
