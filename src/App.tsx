@@ -32,47 +32,50 @@ function App() {
         </p>
       </header>
 
-      <div
-        role="group"
-        aria-label="View mode"
-        className="absolute right-6 top-8 z-20 flex h-11 rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15 sm:right-10"
-      >
-        {/* Sliding highlight behind the active option */}
-        <span
-          aria-hidden
-          className={`absolute inset-y-1 left-1 w-12 rounded-full bg-cream-dark ring-1 ring-bark/15 transition-transform duration-300 ease-out ${
-            flat ? 'translate-x-full' : 'translate-x-0'
-          }`}
-        />
-        {(['3D', '2D'] as const).map((label) => {
-          const active = (label === '2D') === flat
-          return (
-            <button
-              key={label}
-              type="button"
-              aria-pressed={active}
-              onClick={() => setFlat(label === '2D')}
-              className={`relative h-9 w-12 rounded-full transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
-                active ? 'text-bark' : 'text-bark-muted hover:text-bark'
-              }`}
-            >
-              {label}
-            </button>
-          )
-        })}
-      </div>
+      {/* Top-right controls: axis gizmo to the left of the 3D/2D switch */}
+      <div className="absolute right-6 top-8 z-20 flex items-center gap-3 sm:right-10">
+        {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
+            In 2D it shows only the net's x/y axes and recenters the flat view. */}
+        <button
+          type="button"
+          onClick={() => setResetKey((k) => k + 1)}
+          title={flat ? 'Recenter view' : 'Reset view'}
+          aria-label={flat ? 'Recenter view' : 'Reset view'}
+          className="group flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95"
+        >
+          <AxisGizmo ref={gizmo} flat={flat} />
+        </button>
 
-      {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
-          In 2D it shows only the net's x/y axes and recenters the flat view. */}
-      <button
-        type="button"
-        onClick={() => setResetKey((k) => k + 1)}
-        title={flat ? 'Recenter view' : 'Reset view'}
-        aria-label={flat ? 'Recenter view' : 'Reset view'}
-        className="group absolute right-6 top-[5.5rem] z-20 flex h-11 w-11 items-center justify-center rounded-full bg-cream-light text-bark shadow-sm ring-1 ring-bark/15 transition duration-300 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark active:scale-95 sm:right-10"
-      >
-        <AxisGizmo ref={gizmo} flat={flat} />
-      </button>
+        <div
+          role="group"
+          aria-label="View mode"
+          className="relative flex h-11 rounded-full bg-cream-light p-1 text-sm font-medium shadow-sm ring-1 ring-bark/15"
+        >
+          {/* Sliding highlight behind the active option */}
+          <span
+            aria-hidden
+            className={`absolute inset-y-1 left-1 w-12 rounded-full bg-cream-dark ring-1 ring-bark/15 transition-transform duration-300 ease-out ${
+              flat ? 'translate-x-full' : 'translate-x-0'
+            }`}
+          />
+          {(['3D', '2D'] as const).map((label) => {
+            const active = (label === '2D') === flat
+            return (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFlat(label === '2D')}
+                className={`relative h-9 w-12 rounded-full transition-colors duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bark ${
+                  active ? 'text-bark' : 'text-bark-muted hover:text-bark'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       <main className="relative min-h-[60vh] flex-1 cursor-grab active:cursor-grabbing">
         <div className="absolute inset-0">
