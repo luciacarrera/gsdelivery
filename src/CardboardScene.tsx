@@ -70,6 +70,7 @@ const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appe
 
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
+const TAPE_SECONDS = 0.5 // tape fading off before unfolding, and back on once the box has closed
 const FOV = 40
 // Starting 3D view distance multiplier (1 = original framing); stays within maxDistance (14) on mobile
 const HOME_ZOOM_OUT = 1.25
@@ -297,20 +298,17 @@ function GlueTab() {
   )
 }
 
-function Tape() {
+// `shown`: 0 = no tape, 1 = fully taped; CardboardBox drives it
+function Tape({ shown }: { shown: RefObject<number> }) {
   const material = useMemo(
     () => new MeshStandardMaterial({ color: '#d8b77e', roughness: 0.35, transparent: true, opacity: 0.85 }),
     [],
   )
   const group = useRef<Group>(null)
-  const progress = useContext(FoldContext)
 
-  // Tape spans the seams, so it peels away during the first half of the large-flap stage
   useFrame(() => {
-    const [start, end] = STAGES.largeFlaps
-    const fade = 1 - MathUtils.clamp((progress.current - start) / ((end - start) / 2), 0, 1)
-    material.opacity = 0.85 * fade
-    group.current!.visible = fade > 0
+    material.opacity = 0.85 * shown.current
+    group.current!.visible = shown.current > 0
   })
 
   return (
@@ -355,12 +353,18 @@ function CardboardBox({
     [],
   )
   const root = useRef<Group>(null)
+  const tape = useRef(progress.current === 0 ? 1 : 0)
 
   useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.1)
+    // Tape comes off before the box opens, and only goes back on once it's fully closed
+    if (flat) tape.current = Math.max(0, tape.current - dt / TAPE_SECONDS)
+    else if (progress.current === 0) tape.current = Math.min(1, tape.current + dt / TAPE_SECONDS)
+
     const target = flat ? 1 : 0
-    // While the camera heads back to its starting angle, the box waits to unfold
-    if (target > progress.current && hold.current) return
-    const step = Math.min(delta, 0.1) / FOLD_SECONDS
+    // Hold the unfold while the camera heads back to its starting angle and while the tape comes off
+    if (target > progress.current && (hold.current || tape.current > 0)) return
+    const step = dt / FOLD_SECONDS
     progress.current =
       progress.current < target ? Math.min(target, progress.current + step) : Math.max(target, progress.current - step)
 
@@ -400,7 +404,7 @@ function CardboardBox({
               </Hinge>
             </group>
 
-            <Tape />
+            <Tape shown={tape} />
           </group>
         </CreaseContext.Provider>
       </TextureContext.Provider>
