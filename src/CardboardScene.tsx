@@ -67,6 +67,11 @@ const CREASE_DASH_SPACING = 0.085 // dash + gap
 const CREASE_DASH_THICKNESS = CREASE_WIDTH // same weight as the fold creases
 const CREASE_DASH_OPACITY = 0.45
 const CREASE_FADE_START = 0.85 // unfold progress at which creases start to appear
+// On the closed box, the folds of the narrow (side) flaps are scored along the lid's
+// short edges (across the tape too) and along the taped seam between the large flaps
+const LID_CREASE_WIDTH = 0.012
+const LID_CREASE_HIGHLIGHT_WIDTH = 0.006
+const TAPE_CREASE_OPACITY_SCALE = 0.5 // creases on the tape show fainter, as if seen through it
 
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
@@ -336,6 +341,89 @@ function Tape() {
   )
 }
 
+// Scored lines along the closed lid's short edges (top and bottom), where the narrow
+// flaps fold, continuing over the tape where it bends across those edges, plus one along
+// the taped seam between the large flaps. Like the tape, they belong to the closed box
+// and fade out as the large flaps open.
+function LidCreases() {
+  const materials = useMemo(
+    () => ({
+      groove: makeCreaseMaterial(CREASE_COLOR),
+      highlight: makeCreaseMaterial('#fff6e3'),
+      tapeGroove: makeCreaseMaterial(CREASE_COLOR),
+      tapeHighlight: makeCreaseMaterial('#fff6e3'),
+    }),
+    [],
+  )
+  const group = useRef<Group>(null)
+  const progress = useContext(FoldContext)
+
+  useFrame(() => {
+    const [start, end] = STAGES.largeFlaps
+    const fade = 1 - MathUtils.clamp((progress.current - start) / ((end - start) / 2), 0, 1)
+    materials.groove.opacity = CREASE_OPACITY * fade
+    materials.highlight.opacity = CREASE_HIGHLIGHT_OPACITY * fade
+    materials.tapeGroove.opacity = CREASE_OPACITY * TAPE_CREASE_OPACITY_SCALE * fade
+    materials.tapeHighlight.opacity = CREASE_HIGHLIGHT_OPACITY * TAPE_CREASE_OPACITY_SCALE * fade
+    group.current!.visible = fade > 0
+  })
+
+  // Lid surface, and the tape's top surface where it crosses the edge
+  const runs = [
+    { y: HEIGHT / 2, length: DEPTH, onTape: false },
+    { y: HEIGHT / 2 + TAPE_THICKNESS, length: TAPE_WIDTH, onTape: true },
+  ]
+  // Groove hugs the edge; highlight runs alongside, further onto the lid
+  const strips = (onTape: boolean) => [
+    {
+      material: onTape ? materials.tapeGroove : materials.groove,
+      width: LID_CREASE_WIDTH,
+      inset: LID_CREASE_WIDTH / 2,
+    },
+    {
+      material: onTape ? materials.tapeHighlight : materials.highlight,
+      width: LID_CREASE_HIGHLIGHT_WIDTH,
+      inset: LID_CREASE_WIDTH + LID_CREASE_HIGHLIGHT_WIDTH / 2,
+    },
+  ]
+
+  return (
+    <group ref={group}>
+      {[1, -1].map((face) => (
+        <group key={face} scale={[1, face, 1]}>
+          {[1, -1].map((side) =>
+            runs.map(({ y, length, onTape }) =>
+              strips(onTape).map(({ material, width, inset }) => (
+                <mesh
+                  key={`${side}${y}${width}`}
+                  material={material}
+                  position={[side * (WIDTH / 2 - inset), y + CREASE_LIFT, 0]}
+                  rotation={[-Math.PI / 2, 0, 0]}
+                  renderOrder={1} // after the (transparent) tape, so it shows on top of it
+                >
+                  <planeGeometry args={[width, length]} />
+                </mesh>
+              )),
+            ),
+          )}
+          {/* The seam where the two large flaps meet, scored on top of the tape that joins them */}
+          {strips(true).map(({ material, width, inset }) => (
+            <mesh
+              key={`seam${width}`}
+              material={material}
+              position={[0, HEIGHT / 2 + TAPE_THICKNESS + CREASE_LIFT, inset - LID_CREASE_WIDTH / 2]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              renderOrder={1}
+            >
+              <planeGeometry args={[WIDTH, width]} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  )
+}
+
 function CardboardBox({ flat }: { flat: boolean }) {
   const texture = useMemo(() => makeCardboardTexture(), [])
   const crease = useMemo<CreaseMaterials>(
@@ -392,6 +480,7 @@ function CardboardBox({ flat }: { flat: boolean }) {
             </group>
 
             <Tape />
+            <LidCreases />
           </group>
         </CreaseContext.Provider>
       </TextureContext.Provider>
