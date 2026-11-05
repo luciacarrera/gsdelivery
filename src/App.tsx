@@ -1,14 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Quaternion } from 'three'
 import AxisGizmo, { type AxisGizmoHandle } from './AxisGizmo'
+import Bibliography, { linkClass } from './Bibliography'
 import CardboardScene from './CardboardScene'
 import { CAPTIONS } from './print/sankeyPrint'
+import SiteHeader from './SiteHeader'
 
 const YEAR = new Date().getFullYear()
+const BASE_TITLE = 'Corrugated Metabolism'
 // Hide the hint once the user starts interacting: pointerdown = drag/pan or touch pinch, wheel = zoom
 const DISMISS_EVENTS = ['pointerdown', 'wheel'] as const
 
+// Hash routing (#bibliography) so refreshes work on GitHub Pages without a 404 fallback.
+function useHash() {
+  const [hash, setHash] = useState(() => window.location.hash)
+  useEffect(() => {
+    const onChange = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', onChange)
+    return () => window.removeEventListener('hashchange', onChange)
+  }, [])
+  return hash
+}
+
 function App() {
+  const showBibliography = useHash() === '#bibliography'
   const [showHint, setShowHint] = useState(true)
   const [flat, setFlat] = useState(false)
   const [resetKey, setResetKey] = useState(0)
@@ -22,26 +37,33 @@ function App() {
     return { top: header.current.getBoundingClientRect().bottom, bottom: captions.current.getBoundingClientRect().top }
   }, [])
 
+  // Only listen for the first interaction while the diagram is on screen, so reading the
+  // bibliography first doesn't silently dismiss the hint.
   useEffect(() => {
+    if (showBibliography || !showHint) return
     const dismiss = () => setShowHint(false)
     DISMISS_EVENTS.forEach((e) => window.addEventListener(e, dismiss, { once: true, passive: true }))
     return () => DISMISS_EVENTS.forEach((e) => window.removeEventListener(e, dismiss))
-  }, [])
+  }, [showBibliography, showHint])
+
+  useEffect(() => {
+    document.title = showBibliography ? 'Corrugated Bibliography' : BASE_TITLE
+    window.scrollTo(0, 0)
+  }, [showBibliography])
+
+  // The WebGL scene unmounts while the bibliography is open; returning resets the camera.
+  if (showBibliography) return <Bibliography year={YEAR} />
 
   return (
     <div className="relative flex min-h-screen flex-col bg-cream font-sans text-bark">
-      <header ref={header} className="pointer-events-none absolute left-0 top-0 z-10 px-6 pt-8 text-left text-outline-cream sm:px-10">
-        <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-4xl">
-          Corrugated Metabolism
-        </h1>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base">
-          Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon
-        </p>
-      </header>
+      <SiteHeader
+        ref={header}
+        className="pointer-events-none absolute left-0 top-0 z-10 text-outline-cream"
+      />
 
-      {/* View controls: bottom-right on mobile (above the copyright, clear of the title),
-          top-right from sm up. Axis gizmo sits to the left of the 3D/2D switch. */}
-      <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom))] right-6 z-20 flex items-center gap-3 sm:bottom-auto sm:right-10 sm:top-8">
+      {/* View controls: bottom-right on mobile (above the bibliography link and copyright,
+          clear of the title), top-right from sm up. Axis gizmo sits to the left of the 3D/2D switch. */}
+      <div className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] right-6 z-20 flex items-center gap-3 sm:bottom-auto sm:right-10 sm:top-8">
         {/* Axis gizmo: follows the box as it turns; click to fly back to the starting angle and zoom.
             In 2D it shows only the net's x/y axes and recenters the flat view. */}
         <button
@@ -112,7 +134,14 @@ function App() {
             <p key={c}>{c}</p>
           ))}
         </div>
-        <p className="shrink-0 text-right">© {YEAR} Corrugated Metabolism</p>
+        <div className="shrink-0 text-right">
+          <p>
+            <a href="#bibliography" className={`pointer-events-auto ${linkClass}`}>
+              Bibliography
+            </a>
+          </p>
+          <p className="mt-1">© {YEAR} Corrugated Metabolism</p>
+        </div>
       </footer>
     </div>
   )
