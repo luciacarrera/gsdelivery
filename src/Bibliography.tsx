@@ -48,7 +48,7 @@ export default function Bibliography({ year }: { year: number }) {
         <h2 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">
           Bibliography
         </h2>
-        <ul className="mt-6 max-w-3xl space-y-5 text-sm leading-relaxed sm:text-base">
+        <ul className="mt-6 space-y-5 text-sm leading-relaxed sm:text-base">
           {SOURCES.map(({ citation, url }) => (
             <li key={url} className="pl-8 -indent-8">
               {citation}{' '}
