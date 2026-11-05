@@ -41,7 +41,8 @@ export const linkClass =
 
 export default function Bibliography({ year }: { year: number }) {
   return (
-    <div className="flex min-h-screen flex-col bg-cream font-sans text-bark">
+    // Extra side padding on top of the shared px-6/sm:px-10 gutter, so text sits further in.
+    <div className="flex min-h-screen flex-col bg-cream px-4 font-sans text-bark sm:px-10 lg:px-20">
       <SiteHeader linkHome />
 
       <main className="flex-1 px-6 pt-10 pb-12 sm:px-10">
