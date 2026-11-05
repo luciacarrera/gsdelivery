@@ -42,7 +42,7 @@ export const linkClass =
 export default function Bibliography({ year }: { year: number }) {
   return (
     <div className="flex min-h-screen flex-col bg-cream font-sans text-bark">
-      <SiteHeader title="Corrugated Bibliography" linkHome />
+      <SiteHeader title="Corrugated Bibliography" linkHome divider={false} />
 
       <main className="flex-1 px-6 pt-10 pb-12 sm:px-10">
         <ul className="space-y-5 text-sm leading-relaxed sm:text-base">

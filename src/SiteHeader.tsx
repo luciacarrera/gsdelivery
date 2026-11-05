@@ -2,6 +2,8 @@ type SiteHeaderProps = {
   title?: string
   /** Render the title as a link back to the diagram (used on secondary views). */
   linkHome?: boolean
+  /** Show the short moss divider under the title. */
+  divider?: boolean
   className?: string
 }
 
@@ -9,6 +11,7 @@ type SiteHeaderProps = {
 export default function SiteHeader({
   title = 'Corrugated Metabolism',
   linkHome = false,
+  divider = true,
   className = '',
 }: SiteHeaderProps) {
   return (
@@ -25,7 +28,7 @@ export default function SiteHeader({
           title
         )}
       </h1>
-      <div className="mt-3 h-px w-16 bg-moss" />
+      {divider && <div className="mt-3 h-px w-16 bg-moss" />}
       <p className="mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base">
         Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon
       </p>
