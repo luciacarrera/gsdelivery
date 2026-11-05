@@ -61,16 +61,15 @@ export default function Bibliography({ year }: { year: number }) {
             </li>
           ))}
         </ul>
-
-        <p className="mt-10 text-sm">
-          <a href="#" className={linkClass}>
-            ← Back to diagram
-          </a>
-        </p>
       </main>
 
       <footer className="px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted sm:px-10">
-        <p className="text-right">© {year} Corrugated Metabolism</p>
+        <p className="text-right">
+          <a href="#" className={linkClass}>
+            Diagram
+          </a>
+        </p>
+        <p className="mt-1 text-right">© {year} Corrugated Metabolism</p>
       </footer>
     </div>
   )
