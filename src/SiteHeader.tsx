@@ -1,12 +1,16 @@
 type SiteHeaderProps = {
+  title?: string
   /** Render the title as a link back to the diagram (used on secondary views). */
   linkHome?: boolean
   className?: string
 }
 
 /** Title, moss rule, and author line shared by every view. */
-export default function SiteHeader({ linkHome = false, className = '' }: SiteHeaderProps) {
-  const title = 'Corrugated Metabolism'
+export default function SiteHeader({
+  title = 'Corrugated Metabolism',
+  linkHome = false,
+  className = '',
+}: SiteHeaderProps) {
   return (
     <header className={`px-6 pt-8 text-left sm:px-10 ${className}`}>
       <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-4xl">

@@ -42,13 +42,10 @@ export const linkClass =
 export default function Bibliography({ year }: { year: number }) {
   return (
     <div className="flex min-h-screen flex-col bg-cream font-sans text-bark">
-      <SiteHeader linkHome />
+      <SiteHeader title="Corrugated Bibliography" linkHome />
 
       <main className="flex-1 px-6 pt-10 pb-12 sm:px-10">
-        <h2 className="font-display text-xl font-semibold tracking-tight sm:text-2xl">
-          Bibliography
-        </h2>
-        <ul className="mt-6 space-y-5 text-sm leading-relaxed sm:text-base">
+        <ul className="space-y-5 text-sm leading-relaxed sm:text-base">
           {SOURCES.map(({ citation, url }) => (
             <li key={url} className="pl-8 -indent-8">
               {citation}{' '}

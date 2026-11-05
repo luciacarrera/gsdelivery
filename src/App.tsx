@@ -39,7 +39,7 @@ function App() {
   }, [showBibliography, showHint])
 
   useEffect(() => {
-    document.title = showBibliography ? `Bibliography · ${BASE_TITLE}` : BASE_TITLE
+    document.title = showBibliography ? 'Corrugated Bibliography' : BASE_TITLE
     window.scrollTo(0, 0)
   }, [showBibliography])
 
