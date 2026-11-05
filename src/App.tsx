@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Quaternion } from 'three'
 import AxisGizmo, { type AxisGizmoHandle } from './AxisGizmo'
 import CardboardScene from './CardboardScene'
+import { CAPTIONS } from './print/sankeyPrint'
 
 const YEAR = new Date().getFullYear()
 // Hide the hint once the user starts interacting: pointerdown = drag/pan or touch pinch, wheel = zoom
@@ -13,6 +14,13 @@ function App() {
   const [resetKey, setResetKey] = useState(0)
   const gizmo = useRef<AxisGizmoHandle>(null)
   const updateGizmo = useCallback((q: Quaternion) => gizmo.current?.update(q), [])
+  // The 2D view centres the net between the title block and the captions
+  const header = useRef<HTMLElement>(null)
+  const captions = useRef<HTMLDivElement>(null)
+  const textBand = useCallback(() => {
+    if (!header.current || !captions.current) return null
+    return { top: header.current.getBoundingClientRect().bottom, bottom: captions.current.getBoundingClientRect().top }
+  }, [])
 
   useEffect(() => {
     const dismiss = () => setShowHint(false)
@@ -22,11 +30,10 @@ function App() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-cream font-sans text-bark">
-      <header className="pointer-events-none absolute left-0 top-0 z-10 px-6 pt-8 text-left sm:px-10">
+      <header ref={header} className="pointer-events-none absolute left-0 top-0 z-10 px-6 pt-8 text-left text-outline-cream sm:px-10">
         <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-4xl">
           Corrugated Metabolism
         </h1>
-        <div className="mt-3 h-px w-16 bg-moss" />
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base">
           Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon
         </p>
@@ -80,7 +87,7 @@ function App() {
 
       <main className="relative min-h-[60vh] flex-1 cursor-grab active:cursor-grabbing">
         <div className="absolute inset-0">
-          <CardboardScene flat={flat} resetKey={resetKey} onCameraFrame={updateGizmo} />
+          <CardboardScene flat={flat} resetKey={resetKey} onCameraFrame={updateGizmo} textBand={textBand} />
         </div>
       </main>
 
@@ -97,8 +104,15 @@ function App() {
         </p>
       </div>
 
-      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 w-full px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted sm:px-10">
-        <p className="text-right">© {YEAR} Corrugated Metabolism</p>
+      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 flex w-full items-end justify-between gap-6 px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted text-outline-cream sm:px-10">
+        {/* What the two halves of the Sankey printed on the box show */}
+        {/* One line per caption; phones are too narrow for that, so there they wrap */}
+        <div ref={captions} className="max-w-[55%] min-w-0 space-y-0.5 text-left text-[11px] leading-snug sm:max-w-none sm:whitespace-nowrap sm:text-xs">
+          {CAPTIONS.map((c) => (
+            <p key={c}>{c}</p>
+          ))}
+        </div>
+        <p className="shrink-0 text-right">© {YEAR} Corrugated Metabolism</p>
       </footer>
     </div>
   )
