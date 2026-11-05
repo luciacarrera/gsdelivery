@@ -12,6 +12,22 @@
   --font-sans: "Inter", system-ui, sans-serif;
 }
 
+/* Cream outline for page text that can end up over the box (zoomed or panned): invisible on the
+   cream background, it keeps the text legible on the cardboard and its print */
+@utility text-outline-cream {
+  text-shadow:
+    1px 0 0 var(--color-cream),
+    -1px 0 0 var(--color-cream),
+    0 1px 0 var(--color-cream),
+    0 -1px 0 var(--color-cream),
+    1px 1px 0 var(--color-cream),
+    -1px -1px 0 var(--color-cream),
+    1px -1px 0 var(--color-cream),
+    -1px 1px 0 var(--color-cream),
+    0 0 4px var(--color-cream),
+    0 0 8px var(--color-cream);
+}
+
 html {
   background-color: var(--color-cream);
 }

@@ -3,6 +3,7 @@ import type { Quaternion } from 'three'
 import AxisGizmo, { type AxisGizmoHandle } from './AxisGizmo'
 import Bibliography, { linkClass } from './Bibliography'
 import CardboardScene from './CardboardScene'
+import { CAPTIONS } from './print/sankeyPrint'
 import SiteHeader from './SiteHeader'
 
 const YEAR = new Date().getFullYear()
@@ -28,6 +29,13 @@ function App() {
   const [resetKey, setResetKey] = useState(0)
   const gizmo = useRef<AxisGizmoHandle>(null)
   const updateGizmo = useCallback((q: Quaternion) => gizmo.current?.update(q), [])
+  // The 2D view centres the net between the title block and the captions
+  const header = useRef<HTMLElement>(null)
+  const captions = useRef<HTMLDivElement>(null)
+  const textBand = useCallback(() => {
+    if (!header.current || !captions.current) return null
+    return { top: header.current.getBoundingClientRect().bottom, bottom: captions.current.getBoundingClientRect().top }
+  }, [])
 
   // Only listen for the first interaction while the diagram is on screen, so reading the
   // bibliography first doesn't silently dismiss the hint.
@@ -48,7 +56,10 @@ function App() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-cream font-sans text-bark">
-      <SiteHeader className="pointer-events-none absolute left-0 top-0 z-10" />
+      <SiteHeader
+        ref={header}
+        className="pointer-events-none absolute left-0 top-0 z-10 text-outline-cream"
+      />
 
       {/* View controls: bottom-right on mobile (above the bibliography link and copyright,
           clear of the title), top-right from sm up. Axis gizmo sits to the left of the 3D/2D switch. */}
@@ -98,7 +109,7 @@ function App() {
 
       <main className="relative min-h-[60vh] flex-1 cursor-grab active:cursor-grabbing">
         <div className="absolute inset-0">
-          <CardboardScene flat={flat} resetKey={resetKey} onCameraFrame={updateGizmo} />
+          <CardboardScene flat={flat} resetKey={resetKey} onCameraFrame={updateGizmo} textBand={textBand} />
         </div>
       </main>
 
@@ -115,13 +126,22 @@ function App() {
         </p>
       </div>
 
-      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 w-full px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted sm:px-10">
-        <p className="text-right">
-          <a href="#bibliography" className={`pointer-events-auto ${linkClass}`}>
-            Bibliography
-          </a>
-        </p>
-        <p className="mt-1 text-right">© {YEAR} Corrugated Metabolism</p>
+      <footer className="pointer-events-none absolute bottom-0 left-0 z-10 flex w-full items-end justify-between gap-6 px-6 pt-8 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm text-bark-muted text-outline-cream sm:px-10">
+        {/* What the two halves of the Sankey printed on the box show */}
+        {/* One line per caption; phones are too narrow for that, so there they wrap */}
+        <div ref={captions} className="max-w-[55%] min-w-0 space-y-0.5 text-left text-[11px] leading-snug sm:max-w-none sm:whitespace-nowrap sm:text-xs">
+          {CAPTIONS.map((c) => (
+            <p key={c}>{c}</p>
+          ))}
+        </div>
+        <div className="shrink-0 text-right">
+          <p>
+            <a href="#bibliography" className={`pointer-events-auto ${linkClass}`}>
+              Bibliography
+            </a>
+          </p>
+          <p className="mt-1">© {YEAR} Corrugated Metabolism</p>
+        </div>
       </footer>
     </div>
   )

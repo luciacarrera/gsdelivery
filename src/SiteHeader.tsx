@@ -1,21 +1,22 @@
+import type { Ref } from 'react'
+
 type SiteHeaderProps = {
   title?: string
   /** Render the title as a link back to the diagram (used on secondary views). */
   linkHome?: boolean
-  /** Show the short moss divider under the title. */
-  divider?: boolean
   className?: string
+  ref?: Ref<HTMLElement>
 }
 
-/** Title, moss rule, and author line shared by every view. */
+/** Title and author line shared by every view. */
 export default function SiteHeader({
   title = 'Corrugated Metabolism',
   linkHome = false,
-  divider = true,
   className = '',
+  ref,
 }: SiteHeaderProps) {
   return (
-    <header className={`px-6 pt-8 text-left sm:px-10 ${className}`}>
+    <header ref={ref} className={`px-6 pt-8 text-left sm:px-10 ${className}`}>
       <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-4xl">
         {linkHome ? (
           <a
@@ -28,7 +29,6 @@ export default function SiteHeader({
           title
         )}
       </h1>
-      {divider && <div className="mt-3 h-px w-16 bg-moss" />}
       <p className="mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base">
         Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon
       </p>
