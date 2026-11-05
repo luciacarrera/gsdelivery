@@ -7,6 +7,7 @@ import {
   DoubleSide,
   Group,
   MathUtils,
+  Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
@@ -73,6 +74,16 @@ const LID_CREASE_WIDTH = 0.012
 const LID_CREASE_HIGHLIGHT_WIDTH = 0.006
 const TAPE_CREASE_OPACITY_SCALE = 0.5 // creases on the tape show fainter, as if seen through it
 
+// Shipping label stuck on the lid, over the tape (landscape, ~3:2 like a 4x6" label)
+const LABEL_WIDTH = 1.2
+const LABEL_HEIGHT = 0.8
+const LABEL_LIFT = 2 * CREASE_LIFT // above the tape and the seam crease drawn on it
+const LABEL_FONT = '"Poppins", "Inter", system-ui, sans-serif'
+const SHIP_TO = ['48 Quincy Street', 'Cambridge, MA 02138']
+const TRACKING_NUMBER = 'GSD 4813 8020 0271 3800'
+// Harvard GSD "H" mark (public/label/gsd-logo.png): the glyph's bounds within the 3840x2160 PNG
+const LOGO_CROP = { x: 1048, y: 27, w: 1744, h: 2106 }
+
 const FOLD_SECONDS = 2.4
 const CAMERA_SECONDS = 1.1
 const TAPE_SECONDS = 0.5 // tape fading off before unfolding, and back on once the box has closed
@@ -118,6 +129,96 @@ function makeCardboardTexture() {
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
   texture.anisotropy = 8
+  return texture
+}
+
+// Paints the GSDelivery shipping label. The text is drawn once Poppins has loaded, so the
+// canvas doesn't bake in a fallback font.
+function makeLabelTexture() {
+  const w = 1800
+  const h = Math.round((w * LABEL_HEIGHT) / LABEL_WIDTH)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.anisotropy = 8
+
+  const pad = 70
+  const ink = '#111'
+  const rule = (y: number, weight = 6) => ctx.fillRect(pad, y - weight / 2, w - 2 * pad, weight)
+
+  const paint = () => {
+    ctx.clearRect(0, 0, w, h)
+    // Paper, with a thin printed border
+    ctx.fillStyle = '#fbfaf5'
+    ctx.beginPath()
+    ctx.roundRect(0, 0, w, h, 28)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)'
+    ctx.lineWidth = 4
+    ctx.stroke()
+
+    ctx.fillStyle = ink
+    ctx.textBaseline = 'alphabetic'
+
+    // Header: wordmark, service-class box
+    ctx.font = `800 150px ${LABEL_FONT}`
+    ctx.letterSpacing = '-4px'
+    ctx.fillText('GSDelivery', pad, 205)
+    ctx.letterSpacing = '0px'
+    // Harvard GSD mark, top right, centred in the header band (above the rule at y = 300)
+    const markH = 200
+    const markW = (markH * LOGO_CROP.w) / LOGO_CROP.h
+    const markCx = w - pad - markW / 2 // right edge on the margin
+    if (logo.complete && logo.naturalWidth) {
+      // Multiply drops the PNG's white background onto the label paper
+      ctx.globalCompositeOperation = 'multiply'
+      ctx.drawImage(logo, LOGO_CROP.x, LOGO_CROP.y, LOGO_CROP.w, LOGO_CROP.h, markCx - markW / 2, (300 - markH) / 2, markW, markH)
+      ctx.globalCompositeOperation = 'source-over'
+    }
+
+    rule(300, 10)
+
+    // Ship to
+    ctx.font = `600 48px ${LABEL_FONT}`
+    ctx.fillText('SHIP TO:', pad, 380)
+    ctx.font = `600 92px ${LABEL_FONT}`
+    SHIP_TO.forEach((line, i) => ctx.fillText(line, pad + 250, 410 + i * 115))
+
+    rule(620, 10)
+
+    // Tracking barcode (a fixed pseudo-random pattern) with its number underneath
+    ctx.font = `600 44px ${LABEL_FONT}`
+    ctx.fillText('TRACKING #', pad, 680)
+    let seed = 27
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    const top = 705
+    const bottom = h - 120
+    for (let x = pad; x < w - pad - 16; ) {
+      const bar = 6 + Math.floor(rand() * 4) * 6
+      ctx.fillRect(x, top, bar, bottom - top)
+      x += bar + 6 + Math.floor(rand() * 3) * 6
+    }
+    ctx.font = `600 52px ${LABEL_FONT}`
+    ctx.textAlign = 'center'
+    ctx.letterSpacing = '8px'
+    ctx.fillText(TRACKING_NUMBER, w / 2, h - 55)
+    ctx.letterSpacing = '0px'
+    ctx.textAlign = 'left'
+
+    texture.needsUpdate = true
+  }
+
+  const logo = new Image()
+  logo.onload = paint
+  logo.src = `${import.meta.env.BASE_URL}label/gsd-logo.png`
+
+  paint()
+  Promise.all(['800 150px', '600 92px'].map((f) => document.fonts.load(`${f} Poppins`)))
+    .then(paint)
+    .catch(() => {})
   return texture
 }
 
@@ -423,6 +524,47 @@ function LidCreases({ tape }: { tape: RefObject<number> }) {
   )
 }
 
+// The GSDelivery shipping label, centred on the lid over the tape. It's stuck to the tape,
+// so it comes off and goes back on with it (`tape`).
+function ShippingLabel({ tape }: { tape: RefObject<number> }) {
+  const material = useMemo(
+    () => {
+      const texture = makeLabelTexture()
+      return new MeshStandardMaterial({
+        map: texture,
+        // A touch of self-light keeps the paper reading white on the obliquely lit lid
+        emissive: '#ffffff',
+        emissiveMap: texture,
+        emissiveIntensity: 0.35,
+        roughness: 0.8,
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      })
+    },
+    [],
+  )
+  const mesh = useRef<Mesh>(null)
+
+  useFrame(() => {
+    material.opacity = tape.current
+    mesh.current!.visible = tape.current > 0
+  })
+
+  return (
+    <mesh
+      ref={mesh}
+      material={material}
+      position={[0, HEIGHT / 2 + TAPE_THICKNESS + LABEL_LIFT, 0]}
+      rotation={[-Math.PI / 2, 0, 0]} // text reads from the front, top of the label toward the back
+      renderOrder={2} // after the tape and the creases on it
+    >
+      <planeGeometry args={[LABEL_WIDTH, LABEL_HEIGHT]} />
+    </mesh>
+  )
+}
+
 function CardboardBox({
   flat,
   progress,
@@ -495,6 +637,7 @@ function CardboardBox({
 
             <Tape shown={tape} />
             <LidCreases tape={tape} />
+            <ShippingLabel tape={tape} />
           </group>
         </CreaseContext.Provider>
       </TextureContext.Provider>
