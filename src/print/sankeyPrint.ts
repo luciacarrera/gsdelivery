@@ -43,6 +43,12 @@ export const CAPTIONS = [
   "Left: climate impact of 1 kg of corrugated box (normalized global warming, ×10⁻⁶; width = share of the box's footprint)",
   'Right: box demand, North America 2025 (million tonnes)',
 ]
+// Phone version: a headline and units per side; the band-width note moves to the About sheet
+export const CAPTIONS_SHORT = [
+  { side: 'left', title: 'Climate impact', detail: '1 kg of box · global warming ×10⁻⁶' },
+  { side: 'right', title: 'Box demand', detail: 'North America 2025 · million tonnes' },
+] as const
+export const CAPTION_NOTE = "On the left, each band's width is its share of the box's climate footprint."
 
 export type SankeyPrintOptions = {
   // Printed area, in SVG px

@@ -1,9 +1,13 @@
 import type { Ref } from 'react'
 
+export const AUTHORS = 'Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon'
+
 type SiteHeaderProps = {
   title?: string
   /** Render the title as a link back to the diagram (used on secondary views). */
   linkHome?: boolean
+  /** Hide the author line on phones (the diagram shows it in its About sheet instead). */
+  compact?: boolean
   className?: string
   ref?: Ref<HTMLElement>
 }
@@ -12,6 +16,7 @@ type SiteHeaderProps = {
 export default function SiteHeader({
   title = 'Corrugated Metabolism',
   linkHome = false,
+  compact = false,
   className = '',
   ref,
 }: SiteHeaderProps) {
@@ -29,8 +34,12 @@ export default function SiteHeader({
           title
         )}
       </h1>
-      <p className="mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base">
-        Lucía Carrera, Marc Dunand, James Musasizi, and Rick Yoon
+      <p
+        className={`mt-3 max-w-xl text-sm leading-relaxed text-bark-muted sm:text-base ${
+          compact ? 'hidden wide:block' : ''
+        }`}
+      >
+        {AUTHORS}
       </p>
     </header>
   )

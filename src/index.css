@@ -12,6 +12,12 @@
   --font-sans: "Inter", system-ui, sans-serif;
 }
 
+/* Layout modes for the diagram page. `wide` is the desktop layout (controls top-right, captions
+   in the footer). Below it, including phones held sideways, the phone layout applies: captions
+   and a control bar at the bottom. `short` is a phone held sideways (or a very short window). */
+@custom-variant wide (@media (min-width: 40rem) and (min-height: 31.25rem));
+@custom-variant short (@media (max-height: 31.24rem));
+
 /* Cream outline for page text that can end up over the box (zoomed or panned): invisible on the
    cream background, it keeps the text legible on the cardboard and its print */
 @utility text-outline-cream {

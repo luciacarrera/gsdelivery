@@ -25,6 +25,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Frozen snapshots: each tag is built from its own source into dist/<tag>/
+      # and served at /gsdelivery/<tag>/. To add one, tag a commit and add it to the list.
+      - name: Build archived versions
+        run: |
+          for tag in v1; do
+            git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+            git worktree add "../snap-$tag" "$tag"
+            (cd "../snap-$tag" && npm ci && npx vite build --base="/gsdelivery/$tag/" --outDir "$GITHUB_WORKSPACE/dist/$tag" --emptyOutDir)
+          done
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
