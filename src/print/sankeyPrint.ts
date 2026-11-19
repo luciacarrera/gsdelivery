@@ -24,6 +24,7 @@ const CAT_COLOR: Record<string, string> = {
   chem: '#e87ba4',
   maize: '#008300',
   heat: '#e34948',
+  recyc: '#5f9a1c',
   other: '#b9b8b2',
 }
 // Node bars that need a stronger colour than their bands to stand out on the kraft
@@ -37,10 +38,15 @@ const LINK_OPACITY = 0.55
 const NW = 12 // node width
 const GROUP_GAP = 26 // between the groups of inputs in the climate-impact columns
 const MAX_LINES = 3
+// Sizes from the source page (11.5px labels), scaled with the printed font size
+const SRC_FONT = 11.5
+const SRC_GAP = 60 // whitespace splitting the box, industry and used-box columns into an in and an out bar
+const SRC_LOOP_W = 12 // recycling loop where it re-enters on the left
+const SRC_COLNAME = 15 // column names, letters stacked top to bottom
 
 // The captions are shown beside the box rather than printed on it
 export const CAPTIONS = [
-  "Left: climate impact of 1 kg of corrugated box (normalized global warming, ×10⁻⁶; width = share of the box's footprint)",
+  "Left: climate impact of 1 kg of cardboard box (normalized global warming, ×10⁻⁶; width = share of the box's footprint)",
   'Right: box demand, North America 2025 (million tonnes)',
 ]
 // Phone version: a headline and units per side; the band-width note moves to the About sheet
@@ -59,6 +65,8 @@ export type SankeyPrintOptions = {
   boxY: number
   // Clear margin kept inside the printed area's edges
   pad: number
+  // Extra strip past the right edge (the glue tab) that only the recycling loop runs onto
+  bleed?: number
   fontSize: number
   font: string
   // Outline drawn behind labels so they stay legible over the bands (the board colour, so it reads as bare cardboard)
@@ -215,12 +223,21 @@ function layoutGwp(width: number, height: number, padding: number, headroom = 0)
   return { G, total, box, maxLayer: Math.max(...G.nodes.map((d) => n((d as GNode).layer))) }
 }
 
-type CNode = { i: number; label: string; cat: number; value: number; h: number; x0: number; x1: number; y0: number; y1: number }
+// `xo`: offset of a split column's out bar from its in bar (0 when not split)
+type CNode = { i: number; label: string; cat: number; value: number; h: number; x0: number; x1: number; xo: number; y0: number; y1: number }
 type ChainCols = { ind: number; leaf: number; used: number; out: number }
 
 // Lays out the demand chain to the right of the box (root's right edge at x = 0), scaled so its
 // root matches the box node's height. `leafSlot(i)` is the least height leaf i may take (its label).
-function layoutChain(hBox: number, X: ChainCols, leafSlot: (i: number) => number, lh: number, nm: { w: number; h: number }) {
+// The industry and used-box columns are split by `gap` into an in bar (at X) and an out bar.
+function layoutChain(
+  hBox: number,
+  X: ChainCols,
+  gap: number,
+  leafSlot: (i: number) => number,
+  lh: number,
+  nm: { w: number; h: number },
+) {
   const CH = CHAIN
   const count = CH.labels.length
   const U = count - 4
@@ -234,10 +251,11 @@ function layoutChain(hBox: number, X: ChainCols, leafSlot: (i: number) => number
   for (let i = 0; i < count; i++) if (!val[i]) val[i] = inv[i]
   const total = val[0]
   const ky = hBox / total
-  const nodes: CNode[] = CH.labels.map((label, i) => ({ i, label, cat: CH.cat[i], value: val[i], h: val[i] * ky, x0: 0, x1: 0, y0: 0, y1: 0 }))
+  const nodes: CNode[] = CH.labels.map((label, i) => ({ i, label, cat: CH.cat[i], value: val[i], h: val[i] * ky, x0: 0, x1: 0, xo: 0, y0: 0, y1: 0 }))
   nodes.forEach((d, i) => {
     d.x0 = i === 0 ? -NW : i <= 5 ? X.ind : i < U ? X.leaf : i === U ? X.used : X.out
     d.x1 = d.x0 + NW
+    d.xo = (i >= 1 && i <= 5) || i === U ? gap : 0
   })
   const leaves = nodes.filter((d) => d.i >= 6 && d.i < U).sort((a, b) => a.cat - b.cat || a.i - b.i)
   let cur = 0
@@ -266,7 +284,7 @@ function layoutChain(hBox: number, X: ChainCols, leafSlot: (i: number) => number
     d.y0 = cy - d.h / 2
     d.y1 = d.y0 + d.h
   })
-  // End of life: recycling level with the used boxes, landfill and waste-to-energy stacked under it
+  // End of life: recycling (drawn as the loop, not a node) level with the used boxes, landfill and waste-to-energy stacked under it
   // with room for their two-line labels, then the "Not measured" note
   const rec = nodes[R]
   const lf = nodes[L]
@@ -327,13 +345,30 @@ function drawLabel(
   })
 }
 
+// Draws `text` as a column name: capitals stacked top to bottom, centred on (x, y)
+function drawColName(g: Sel, x: number, y: number, text: string, size: number) {
+  const step = size * 0.88
+  const chars = [...text.toUpperCase()]
+  const top = y - (chars.length * step) / 2
+  const t = g.append('text').attr('class', 'colname').attr('text-anchor', 'middle')
+  chars.forEach((c, i) => {
+    if (c !== ' ') t.append('tspan').attr('x', x).attr('y', top + step * (i + 0.5)).attr('dy', '0.35em').text(c)
+  })
+}
+
 export function buildSankeySvg(o: SankeyPrintOptions) {
   const F = o.fontSize
   const LH = F * 1.2
   const T = makeText(o.font, F)
   const fmt = (v: number) => v.toFixed(2)
-  // The box node spans [boxX - NW/2, boxX + NW/2]; the climate impact is mirrored onto its left
-  const XM = o.boxX + NW / 2
+  const sc = F / SRC_FONT
+  const GAP = SRC_GAP * sc
+  const LOOP_W = SRC_LOOP_W * sc
+  const COLNAME = SRC_COLNAME * sc
+  // The box column is split in two bars: the climate-impact box (right edge XM) and, GAP further
+  // on, the demand chain's root (right edge CX). The column is centred on boxX.
+  const XM = o.boxX - (GAP - NW) / 2
+  const CX = XM + GAP
   const mx = (x: number) => XM - x
 
   // ---- Left half: climate impact ----
@@ -365,21 +400,43 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
   const outLines = (title: string, value: string): Line[] => [[{ text: title, cls: 'ttl' }], [{ text: value, cls: 'v' }]]
   const noteLines: Line[] = [[{ text: 'Not measured', cls: 'ttl' }], [{ text: 'Reuse, composting', cls: 'v' }]]
   const nm = { w: T.blockWidth(noteLines) + 40, h: 2 * LH + 20 }
-  const outRoom = Math.max(nm.w, T.width('Waste-to-energy', true), T.width('53.97M tonnes · 96.5%')) + 14
-  const rightW = o.width - o.pad - XM
-  // Same proportions as the source page (210 / 440 / 720 / 920), stretched to the room there is
+  const outRoom = Math.max(nm.w, T.width('Waste-to-energy', true), T.width('1.57M tonnes · 2.8%')) + 14
+  const rightW = o.width - o.pad - CX
+  // Same proportions as the source page (210 / 440 / 720 / 920 plus the split gaps), stretched to the room there is
   const outX = rightW - outRoom - NW
-  const X: ChainCols = { ind: (outX * 210) / 920, leaf: (outX * 440) / 920, used: (outX * 720) / 920, out: outX }
+  const base = outX - 2 * GAP
+  const X: ChainCols = { ind: (base * 210) / 920, leaf: (base * 440) / 920 + GAP, used: (base * 720) / 920 + GAP, out: outX }
   const leafW = X.used - X.leaf - NW - 24
-  const indW = X.leaf - X.ind - NW - 14
+  // Industry names go on both sides: with their tonnage left of the in bar, "Market share" right of the out bar
+  const indInW = X.ind - 14
+  const indOutW = X.leaf - (X.ind + GAP + NW) - 14
+  const indInLabel = (d: CNode): Line[] => [
+    ...T.wrap(d.label, indInW).map((t) => [{ text: t }]),
+    [{ text: fmt(d.value) + 'M tonnes', cls: 'v' }],
+  ]
+  const indOutLabel = (d: CNode): Line[] => [
+    ...T.wrap(d.label, indOutW).map((t) => [{ text: t }]),
+    [{ text: 'Market share', cls: 'v' }],
+  ]
   const leafLabel = (i: number): Line[] => T.wrap(CH.labels[i], leafW).map((t) => [{ text: t }])
   const leafSlot = (i: number) => leafLabel(i).length * LH + 3
+  const colNameH = (text: string) => text.length * COLNAME * 0.88
+  // The units over the box column sit above the labels beside its top (delivered containerboard
+  // on the left, the first industry on the right), in chain coordinates
+  const boxUnitsY = (gwp: { G: { nodes: GNode[] } }, boxC: number, chain: ReturnType<typeof layoutChain>) => {
+    const toChain = chain.cy - boxC
+    const cbm = gwp.G.nodes.find((d) => d.id === 'cbm')!
+    const cbmTop = n(cbm.y0) - HEAD_GAP - gwpLines(cbm).length * LH + toChain
+    const ind = chain.nodes[1]
+    const indTop = (ind.y0 + ind.y1) / 2 - (indInLabel(ind).length * LH) / 2
+    return Math.min(chain.nodes[0].y0, cbmTop, indTop) - 6
+  }
 
   // ---- Fit: the tallest layout whose labels stay inside the printed area, box node centred ----
   const layout = (height: number) => {
     const gwp = layoutGwp(gwpWidth, height, LH + 3, headroom)
     const boxC = (n(gwp.box.y0) + n(gwp.box.y1)) / 2
-    const chain = layoutChain(n(gwp.box.y1) - n(gwp.box.y0), X, leafSlot, LH, nm)
+    const chain = layoutChain(n(gwp.box.y1) - n(gwp.box.y0), X, GAP, leafSlot, LH, nm)
     // Vertical reach above and below the box centre, labels included
     let up = 0
     let down = 0
@@ -399,9 +456,17 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
       }
     })
     chain.nodes.forEach((d) => reach(d.y0, d.y1, chain.cy))
+    chain.nodes.slice(1, 6).forEach((d) => {
+      const m = (d.y0 + d.y1) / 2
+      const h = Math.max(indInLabel(d).length, indOutLabel(d).length) * LH
+      reach(m - h / 2, m + h / 2, chain.cy)
+    })
     reach(chain.top, chain.bottom, chain.cy)
-    reach(chain.nodes[0].y0 - 3 * LH - 6, chain.nodes[0].y0, chain.cy) // "Corrugated box" title
-    reach(chain.nodes[U].y0 - 2 * LH - 6, chain.nodes[U].y0, chain.cy) // "Used corrugated boxes" title
+    reach(boxUnitsY(gwp, boxC, chain) - LH, chain.nodes[0].y0, chain.cy) // units over the box column
+    reach(chain.nodes[U].y0 - LH - 6, chain.nodes[U].y0, chain.cy) // units over the used boxes
+    reach(chain.cy - colNameH('Cardboard box') / 2, chain.cy + colNameH('Cardboard box') / 2, chain.cy)
+    const um = (chain.nodes[U].y0 + chain.nodes[U].y1) / 2
+    reach(um - colNameH('Used cardboard boxes') / 2, um + colNameH('Used cardboard boxes') / 2, chain.cy)
     reach(chain.note.y, chain.note.y + chain.note.h, chain.cy)
     return { gwp, boxC, chain, up, down }
   }
@@ -419,19 +484,23 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
   // ---- Draw ----
   const root = create('svg')
     .attr('xmlns', 'http://www.w3.org/2000/svg')
-    .attr('viewBox', `0 0 ${o.width} ${o.height}`)
+    .attr('viewBox', `0 0 ${o.width + (o.bleed ?? 0)} ${o.height}`)
     .attr('font-family', o.font)
   root.append('style').text(`
     .link{fill:none;stroke-opacity:${LINK_OPACITY};mix-blend-mode:multiply}
+    .band{fill-opacity:${LINK_OPACITY};mix-blend-mode:multiply}
     .lbl{font-size:${F}px;fill:${TEXT};paint-order:stroke;stroke:${o.halo};stroke-width:${F * 0.3}px;stroke-linejoin:round}
     .v{fill:${TEXT2}}
     .ttl{font-weight:600}
+    .colname{font-size:${COLNAME}px;font-weight:650;fill:${MUTED}}
     .dash{fill:none;stroke:${MUTED};stroke-width:1.5;stroke-dasharray:4 4}
   `)
+  const loopG = root.append('g') // under both charts
   const linkPath = sankeyLinkHorizontal()
 
   // Climate impact, mirrored so it flows into the box from the left
-  const svg = root.append('g').attr('transform', `translate(0,${o.boxY - boxC})`)
+  const gwpY = o.boxY - boxC
+  const svg = root.append('g').attr('transform', `translate(0,${gwpY})`)
   const mir = svg.append('g').attr('transform', `translate(${XM},0) scale(-1,1)`)
   // The mill → delivered containerboard band is drawn below as fluteboard/linerboard branches
   const split = G.links.find((l) => nodeOf(l.source).id === 'cbm' && nodeOf(l.target).id === 'cbp')
@@ -497,51 +566,63 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
       : drawLabel(labels, mx(n(d.x1)) - 6, (n(d.y0) + n(d.y1)) / 2, gwpLines(d), LH, 'end'),
   )
 
-  // Demand chain on the right; its root lines up with the box node
+  // Demand chain on the right; its root lines up with the box node, GAP to its right
   const kc = (i: number) => (i < 0 ? CHAIN_ROOT : CHAIN_COLOR[i])
-  const gc = root.append('g').attr('transform', `translate(${XM},${o.boxY - C.cy})`)
+  const chainY = o.boxY - C.cy
+  const gc = root.append('g').attr('transform', `translate(${CX},${chainY})`)
   gc.append('g')
     .selectAll('path')
-    .data(C.links)
+    .data(C.links.filter((l) => l.target.i !== C.R))
     .join('path')
     .attr('class', 'link')
-    .attr('d', (d) => linkPath(d as never))
+    .attr('d', (d) =>
+      linkPath({ source: { x1: d.source.x1 + d.source.xo }, target: { x0: d.target.x0 }, y0: d.y0, y1: d.y1 } as never),
+    )
     .attr('stroke', (d) => kc(d.lc))
     .attr('stroke-width', (d) => Math.max(1, d.width))
+  // Split columns get a second ("out") bar after their gap
   gc.append('g')
     .selectAll('rect')
-    .data(C.nodes.filter((d) => d.i > 0))
+    .data(
+      C.nodes
+        .filter((d) => d.i !== C.R)
+        .flatMap((d) => (d.xo ? [{ d, x: d.x0 }, { d, x: d.x0 + d.xo }] : [{ d, x: d.x0 }])),
+    )
     .join('rect')
-    .attr('x', (d) => d.x0)
-    .attr('y', (d) => d.y0)
+    .attr('x', (b) => b.x)
+    .attr('y', (b) => b.d.y0)
     .attr('width', NW)
-    .attr('height', (d) => Math.max(2, d.h))
+    .attr('height', (b) => Math.max(2, b.d.h))
     .attr('rx', 2)
-    .attr('fill', (d) => kc(d.cat))
+    .attr('fill', (b) => (b.d.i === 0 ? CAT_COLOR.box : kc(b.d.cat)))
   const cl = gc.append('g')
   C.nodes
-    .filter((d) => d.label && d.i > 0 && d.i < C.U)
-    .forEach((d) => {
-      const lines = d.i <= 5 ? T.wrap(d.label, indW).map((t) => [{ text: t }]) : leafLabel(d.i)
-      drawLabel(cl, d.x1 + 6, (d.y0 + d.y1) / 2, lines, LH)
-    })
+    .filter((d) => d.label && d.i > 5 && d.i < C.U)
+    .forEach((d) => drawLabel(cl, d.x1 + 6, (d.y0 + d.y1) / 2, leafLabel(d.i), LH))
+  C.nodes.slice(1, 6).forEach((d) => {
+    const m = (d.y0 + d.y1) / 2
+    drawLabel(cl, d.x0 - 6, m, indInLabel(d), LH, 'end')
+    drawLabel(cl, d.x1 + d.xo + 6, m, indOutLabel(d), LH)
+  })
   {
-    // Over the gap to the recycling column, clear of the company labels to its left
-    const d = C.nodes[C.U]
-    drawLabel(cl, d.x0, d.y0 - 6, outLines('Used corrugated boxes', C.total.toFixed(1) + 'M tonnes'), LH, 'start', 'bottom')
-  }
-  {
-    const d = C.nodes[0]
-    const lines: Line[] = [
-      [{ text: 'Corrugated box', cls: 'ttl' }],
-      [{ text: '51.40 ×10⁻⁶ GWP (1 kg)', cls: 'v' }],
-      [{ text: C.total.toFixed(1) + 'M tonnes', cls: 'v' }],
-    ]
-    drawLabel(cl, (d.x0 + d.x1) / 2, d.y0 - 6, lines, LH, 'middle', 'bottom')
+    // Units over each split column, on the side they belong to: the left box bar ends the
+    // climate-impact chart, the right one starts the tonnes chart; used boxes on the out bar
+    const r = C.nodes[0]
+    const u = C.nodes[C.U]
+    const unit = (x: number, y: number, anchor: 'start' | 'end', text: string) =>
+      drawLabel(cl, x, y, [[{ text, cls: 'v' }]], LH, anchor, 'bottom')
+    const by = boxUnitsY(gwp, boxC, C)
+    unit(r.x0 - GAP + NW, by, 'end', '51.40 ×10⁻⁶ GWP (1 kg)')
+    unit(r.x0, by, 'start', C.total.toFixed(1) + 'M tonnes')
+    unit(u.x0 + u.xo, u.y0 - 6, 'start', C.total.toFixed(1) + 'M tonnes')
+    // Column names in the whitespace of each split column
+    const ind = C.nodes[1]
+    drawColName(gc, r.x0 - (GAP - NW) / 2, C.cy, 'Cardboard box', COLNAME)
+    drawColName(gc, ind.x1 + (GAP - NW) / 2, C.cy, 'Industry', COLNAME)
+    drawColName(gc, u.x1 + (GAP - NW) / 2, (u.y0 + u.y1) / 2, 'Used cardboard boxes', COLNAME)
   }
   ;(
     [
-      [C.R, 'Recycling', 96.5],
       [C.L, 'Landfill', 2.8],
       [C.Wt, 'Waste-to-energy', 0.7],
     ] as const
@@ -553,9 +634,37 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
     const nt = C.note
     const u = C.nodes[C.U]
     const cy = nt.y + nt.h / 2
-    gc.append('path').attr('class', 'dash').attr('d', `M${u.x0 + 7},${u.y1 + 4} L${u.x0 + 7},${cy} L${nt.x - 4},${cy}`)
+    const x = u.x0 + u.xo + 7
+    gc.append('path').attr('class', 'dash').attr('d', `M${x},${u.y1 + 4} L${x},${cy} L${nt.x - 4},${cy}`)
     gc.append('rect').attr('class', 'dash').attr('x', nt.x).attr('y', nt.y).attr('width', nt.w).attr('height', nt.h).attr('rx', 6)
     drawLabel(cl, nt.x + nt.w / 2, cy, noteLines, LH, 'middle')
+  }
+
+  // Recycling loop: the recycling share of the used boxes leaves through the printed area's right
+  // edge and comes back in through its left edge into recovered paper sorting. The two edges meet
+  // at the box's glue seam, so on the folded box the ribbon runs on round the corner: it leaves at
+  // the height it comes back in, as wide as it re-enters. Schematic, not to scale.
+  {
+    const rec = C.nodes[C.R]
+    const u = C.nodes[C.U]
+    const rl = C.links.find((l) => l.target === rec)!
+    const wpc = G.nodes.find((d) => d.id === 'wpc')!
+    const ye = gwpY + (n(wpc.y0) + n(wpc.y1)) / 2 // where it re-enters, and so where it leaves
+    const xe = mx(n(wpc.x1))
+    const xs = CX + u.x1 + u.xo
+    const ya = chainY + rl.y0 - rl.width / 2
+    const yb = ya + rl.width
+    const xt = o.width + (o.bleed ?? 0) // on over the glue tab, if there is one
+    const xm = (xs + xt) / 2
+    const e = LOOP_W / 2
+    const colour = CAT_COLOR.recyc
+    loopG
+      .append('path')
+      .attr('class', 'band')
+      .attr('d', `M${xs},${ya} C${xm},${ya} ${xm},${ye - e} ${xt},${ye - e} L${xt},${ye + e} C${xm},${ye + e} ${xm},${yb} ${xs},${yb} Z`)
+      .attr('fill', colour)
+    loopG.append('path').attr('class', 'link').attr('d', `M0,${ye} L${xe},${ye}`).attr('stroke', colour).attr('stroke-width', LOOP_W)
+    drawLabel(root.append('g'), xs + 10, (ya + yb) / 2, outLines('Recycling', `${fmt(rec.value)}M tonnes · 96.5%`), LH)
   }
 
   return root.node()!

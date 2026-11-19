@@ -15,6 +15,7 @@ import {
   Quaternion,
   RepeatWrapping,
   Shape,
+  ShapeGeometry,
   SRGBColorSpace,
   Texture,
   Vector2,
@@ -90,6 +91,8 @@ const LOGO_CROP = { x: 1048, y: 27, w: 1744, h: 2106 }
 // like a real printed box. Net coordinates put the front panel's centre at the origin.
 const PRINT_X0 = -WIDTH / 2 - DEPTH
 const PRINT_X1 = WIDTH / 2 + DEPTH + WIDTH
+// The print texture runs on over the glue tab, where only the recycling loop goes
+const PRINT_TEX_X1 = PRINT_X1 + GLUE_TAB
 const PRINT_Y1 = HEIGHT / 2 + FLAP_DEPTH
 const PRINT_Y0 = -PRINT_Y1
 const PRINT_PX_PER_UNIT = 300 // SVG px per scene unit the chart is laid out in
@@ -249,11 +252,11 @@ function makeLabelTexture() {
 }
 
 // Paints the Sankey onto a transparent canvas covering the printed area of the net, with the
-// "Corrugated box" node at the centre of the 2D view (NET_CENTER_X, 0).
+// "Cardboard box" column at the centre of the 2D view (NET_CENTER_X, 0).
 function makePrintTexture(maxWidth: number) {
-  const ppu = maxWidth / (PRINT_X1 - PRINT_X0) // canvas px per scene unit
+  const ppu = maxWidth / (PRINT_TEX_X1 - PRINT_X0) // canvas px per scene unit
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round((PRINT_X1 - PRINT_X0) * ppu)
+  canvas.width = Math.round((PRINT_TEX_X1 - PRINT_X0) * ppu)
   canvas.height = Math.round((PRINT_Y1 - PRINT_Y0) * ppu)
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
@@ -266,6 +269,7 @@ function makePrintTexture(maxWidth: number) {
     boxX: (NET_CENTER_X - PRINT_X0) * PRINT_PX_PER_UNIT,
     boxY: PRINT_Y1 * PRINT_PX_PER_UNIT,
     pad: PRINT_PAD * PRINT_PX_PER_UNIT,
+    bleed: GLUE_TAB * PRINT_PX_PER_UNIT,
     fontSize: PRINT_FONT_SIZE,
     font: PRINT_FONT,
     halo: '#c49a6c',
@@ -442,7 +446,7 @@ function Sheet({
     for (let i = 0; i < uv.count; i++) {
       uv.setXY(
         i,
-        (netX + pos.getX(i) - PRINT_X0) / (PRINT_X1 - PRINT_X0),
+        (netX + pos.getX(i) - PRINT_X0) / (PRINT_TEX_X1 - PRINT_X0),
         (netY + pos.getY(i) - PRINT_Y0) / (PRINT_Y1 - PRINT_Y0),
       )
     }
@@ -516,8 +520,11 @@ function Panel({
   )
 }
 
+// The glue tab hangs off the back panel's right edge (net x = PRINT_X1); the recycling loop
+// runs out over it, and it's hidden under the side panel once the box is glued
 function GlueTab() {
   const texture = useContext(TextureContext)
+  const print = useContext(PrintContext)
   const shape = useMemo(() => {
     const taper = 0.12
     const s = new Shape()
@@ -528,11 +535,27 @@ function GlueTab() {
     s.closePath()
     return s
   }, [])
+  const printGeometry = useMemo(() => {
+    const g = new ShapeGeometry(shape)
+    const pos = g.attributes.position
+    const uv = g.attributes.uv
+    for (let i = 0; i < uv.count; i++) {
+      uv.setXY(
+        i,
+        (PRINT_X1 + pos.getX(i) - PRINT_X0) / (PRINT_TEX_X1 - PRINT_X0),
+        (pos.getY(i) - PRINT_Y0) / (PRINT_Y1 - PRINT_Y0),
+      )
+    }
+    return g
+  }, [shape])
   return (
-    <mesh position={[0, 0, -GLUE_INSET]}>
-      <shapeGeometry args={[shape]} />
-      <meshStandardMaterial map={texture} roughness={0.9} side={DoubleSide} />
-    </mesh>
+    <group position={[0, 0, -GLUE_INSET]}>
+      <mesh>
+        <shapeGeometry args={[shape]} />
+        <meshStandardMaterial map={texture} roughness={0.9} side={DoubleSide} />
+      </mesh>
+      {print && <mesh geometry={printGeometry} material={print.open} position={[0, 0, PRINT_LIFT]} renderOrder={-1} />}
+    </group>
   )
 }
 
