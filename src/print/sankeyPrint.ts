@@ -65,6 +65,8 @@ export type SankeyPrintOptions = {
   boxY: number
   // Clear margin kept inside the printed area's edges
   pad: number
+  // Extra strip past the right edge (the glue tab) that only the recycling loop runs onto
+  bleed?: number
   fontSize: number
   font: string
   // Outline drawn behind labels so they stay legible over the bands (the board colour, so it reads as bare cardboard)
@@ -482,7 +484,7 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
   // ---- Draw ----
   const root = create('svg')
     .attr('xmlns', 'http://www.w3.org/2000/svg')
-    .attr('viewBox', `0 0 ${o.width} ${o.height}`)
+    .attr('viewBox', `0 0 ${o.width + (o.bleed ?? 0)} ${o.height}`)
     .attr('font-family', o.font)
   root.append('style').text(`
     .link{fill:none;stroke-opacity:${LINK_OPACITY};mix-blend-mode:multiply}
@@ -652,7 +654,7 @@ export function buildSankeySvg(o: SankeyPrintOptions) {
     const xs = CX + u.x1 + u.xo
     const ya = chainY + rl.y0 - rl.width / 2
     const yb = ya + rl.width
-    const xt = o.width
+    const xt = o.width + (o.bleed ?? 0) // on over the glue tab, if there is one
     const xm = (xs + xt) / 2
     const e = LOOP_W / 2
     const colour = CAT_COLOR.recyc
