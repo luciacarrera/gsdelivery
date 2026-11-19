@@ -249,7 +249,7 @@ function makeLabelTexture() {
 }
 
 // Paints the Sankey onto a transparent canvas covering the printed area of the net, with the
-// "Corrugated box" node at the centre of the 2D view (NET_CENTER_X, 0).
+// "Cardboard box" column at the centre of the 2D view (NET_CENTER_X, 0).
 function makePrintTexture(maxWidth: number) {
   const ppu = maxWidth / (PRINT_X1 - PRINT_X0) // canvas px per scene unit
   const canvas = document.createElement('canvas')
